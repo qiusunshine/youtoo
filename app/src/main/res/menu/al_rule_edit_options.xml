@@ -1,0 +1,58 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/al_rule_edit_save"
+        android:icon="@drawable/ic_action_save_file"
+        android:title="保存"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/al_rule_edit_pure_update"
+        android:icon="@drawable/ic_pure_update_black"
+        android:title="本地化分组"
+        app:showAsAction="ifRoom" />
+    <item
+        android:id="@+id/al_rule_templates"
+        android:title="快捷规则模板"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/al_rule_to_template"
+        android:title="加为规则模板"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/code_to_template"
+        android:title="加代码块模板"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/al_rule_clazz_fetch"
+        android:title="快速生成分类"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/al_rule_test_home"
+        android:title="快速测试首页"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/al_rule_test_search"
+        android:title="快速测试搜索"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/al_rule_publish"
+        android:title="发布提交云仓库"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/dev_and_more"
+        android:title="开发手册与设置"
+        app:showAsAction="never">
+        <menu>
+            <item
+                android:id="@+id/al_rule_edit_dev_note"
+                android:title="开发者手册"
+                app:showAsAction="never" />
+            <item
+                android:id="@+id/al_rule_publish_set"
+                android:title="提交云仓库设置"
+                app:showAsAction="never" />
+        </menu>
+    </item>
+</menu>

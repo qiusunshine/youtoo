@@ -1,0 +1,16 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/save"
+        android:icon="@drawable/save_file_white"
+        android:title="保存"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/share"
+        android:title="分享规则"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/account"
+        android:title="账号密码"
+        app:showAsAction="never" />
+</menu>

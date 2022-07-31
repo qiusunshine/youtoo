@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="color_text_default">@color/grey</color>
+    <color name="colorBackground">@color/black_12</color>
+    <color name="film_nav_bg">#222222</color>
+    <color name="webview_bg">#ff202124</color>
+    <color name="webview_bg_dark">#ff202124</color>
+</resources>

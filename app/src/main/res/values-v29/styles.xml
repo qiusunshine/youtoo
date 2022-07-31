@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColorPrimary">@color/text_color_primary</item>
+        <item name="android:textColorSecondary">@color/text_color_grey_600</item>
+        <item name="android:textColorTertiary">@color/text_color_tertiary</item>
+        <item name="android:actionBarStyle">@style/FullScreenActionBarStyle</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="FullScreenTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:actionBarStyle">@style/FullScreenActionBarStyle</item>
+        <item name="android:windowActionBarOverlay">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="actionOverflowMenuStyle">@style/OverflowMenu</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColorPrimary">@color/text_color_primary</item>
+        <item name="android:textColorSecondary">@color/text_color_grey_600</item>
+        <item name="android:textColorTertiary">@color/text_color_grey_600</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="TranslucentSearchTheme" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="actionOverflowMenuStyle">@style/OverflowMenu</item>
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:textColorPrimary">@color/text_color_primary</item>
+        <item name="android:textColorSecondary">@color/text_color_grey_600</item>
+        <item name="android:textColorTertiary">@color/text_color_grey_600</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="DarkAppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/dark_edit</item>
+        <item name="colorPrimaryDark">@color/dark_edit</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="_XPopup_TransparentDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@null</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowTranslucentStatus">true</item>
+        <item name="android:colorBackground">@null</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="color_dialog" parent="android:Theme.Dialog">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.4</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+
+    <style name="alert_dialog" parent="android:Theme.Dialog">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowBackground">@color/z_transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.4</item>
+        <item name="android:forceDarkAllowed">true</item>
+    </style>
+</resources>

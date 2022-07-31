@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_add"
+        android:title="新增搜索引擎"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_import"
+        android:title="从剪贴板导入"
+        app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_delete_inside"
+        android:title="删除自带引擎"
+        app:showAsAction="never"/>
+</menu>

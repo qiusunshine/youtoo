@@ -1,0 +1,6 @@
+<resources>
+
+    <style name="SplashTheme" parent="HomeTheme">
+        <item name="android:windowBackground">@drawable/background_splash</item>
+    </style>
+</resources>

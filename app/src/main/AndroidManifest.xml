@@ -1,0 +1,644 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:dist="http://schemas.android.com/apk/distribution"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.hikerview">
+
+    <queries>
+        <!--Web Video Caster-->
+        <package android:name="com.instantbits.cast.webvideo"/>
+        <!--QQ浏览器-->
+        <package android:name="com.tencent.mtt"/>
+        <!--VLC-->
+        <package android:name="org.videolan.vlc"/>
+        <!--XPlayer-->
+        <package android:name="video.player.videoplayer"/>
+        <!--UC国际版-->
+        <package android:name="com.UCMobile.intl"/>
+        <!--UC浏览器-->
+        <package android:name="com.UCMobile"/>
+        <!--Kodi-->
+        <package android:name="org.xbmc.kodi"/>
+        <!--kmplayer-->
+        <package android:name="com.kmplayer"/>
+        <!--kmplayer-->
+        <package android:name="com.kmplayerpro"/>
+        <!--MoboPlayer-->
+        <package android:name="com.clov4r.android.nil"/>
+        <!--MXPlayer-->
+        <package android:name="com.mxtech.videoplayer.pro"/>
+        <!--MXPlayer-->
+        <package android:name="com.mxtech.videoplayer.ad"/>
+        <!--弹弹Play-->
+        <package android:name="com.xyoye.dandanplay"/>
+        <!--Lua Player-->
+        <package android:name="ms.dev.luaplayer_pro"/>
+        <!--nPlayer-->
+        <package android:name="com.newin.nplayer.pro"/>
+
+        <!--全能下载器-->
+        <package android:name="com.nick.download"/>
+        <!--IDM-->
+        <package android:name="idm.internet.download.manager.plus"/>
+        <!--闪电下载器-->
+        <package android:name="com.flash.download"/>
+        <!--m3u8loader-->
+        <package android:name="ru.yourok.m3u8loader"/>
+        <!--ADM-->
+        <package android:name="com.dv.adm"/>
+        <!--ADM-->
+        <package android:name="com.dv.adm.pay"/>
+        <!--FDM-->
+        <package android:name="org.freedownloadmanager.fdm" />
+        <!--Reex-->
+        <package android:name="xyz.re.player.ex" />
+    </queries>
+
+    <application
+        android:name="com.example.hikerview.ui.Application"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:windowSoftInputMode="adjustPan|stateUnspecified"
+        tools:ignore="GoogleAppIndexingWarning">
+        <!--x5播放问题-->
+        <uses-library
+            android:name="org.apache.http.legacy"
+            android:required="false" />
+        <activity
+            android:name="com.example.hikerview.ui.bookmark.BookmarkActivity"
+            android:theme="@style/HomeTheme"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+        <activity
+            android:name="com.example.hikerview.ui.search.engine.SearchEngineMagActivity"
+            android:theme="@style/HomeTheme"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+        <activity
+            android:name="com.example.hikerview.ui.browser.WebViewActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/SplashTheme"
+            android:alwaysRetainTaskState="true"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
+            <intent-filter>
+                <category android:name="hiker.intent.category.detail" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcut" />
+        </activity>
+        <activity
+            android:name="com.example.hikerview.ui.video.VideoPlayerActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTop"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/HomeTheme"
+            tools:targetApi="n">
+            <intent-filter>
+                <category android:name="hiker.intent.category.player" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.example.hikerview.ui.home.ArticleListRuleMagActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.home.ArticleListRuleEditActivity"
+            android:label="编辑规则"/>
+        <activity
+            android:name="com.example.hikerview.ui.browser.MediaListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.js.JSEditActivity"
+            android:label="编辑网页插件"
+            android:theme="@style/DarkAppTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.rules.HighLightEditActivity"
+            android:label="编辑规则"
+            android:theme="@style/DarkAppTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.rules.PublishCodeEditActivity"
+            android:label="设置规则"
+            android:theme="@style/DarkAppTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.js.JSListActivity"
+            android:theme="@style/TranslucentFullScreenTheme"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+        <activity
+            android:name="com.example.hikerview.ui.js.AdListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.js.AdUrlListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.FastPlayListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.XTDialogListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.HistoryListActivity"
+            android:theme="@style/TranslucentFullScreenTheme"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.CollectionListActivity"
+            android:theme="@style/TranslucentFullScreenTheme"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.SearchEngineListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.home.ArticleListRuleSearchActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.rules.RuleVerifyActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.rules.RuleStatisticsActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.file.FileBrowserActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.js.HomeHtmlEditActivity"
+            android:label="编辑文件"
+            android:theme="@style/DarkAppTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.UAListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.dlan.MediaPlayActivity"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name="com.example.hikerview.ui.download.DownloadRecordsActivity"
+            android:launchMode="singleTop"
+            android:theme="@style/TranslucentFullScreenTheme" />
+
+        <activity
+            android:name="com.tencent.smtt.sdk.VideoActivity"
+            android:allowTaskReparenting="true"
+            android:alwaysRetainTaskState="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="com.tencent.smtt.tbs.video.PLAY" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.example.hikerview.ui.setting.X5DebugActivity"
+            android:windowSoftInputMode="stateHidden|adjustResize" />
+
+        <activity
+            android:name="com.example.hikerview.ui.search.SearchActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.search.SearchInOneRuleActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.browser.HtmlSourceActivity"
+            android:label="查看网页源码"
+            android:theme="@style/DarkAppTheme" />
+
+        <activity
+            android:name="com.example.hikerview.ui.home.FilmListActivity"
+            android:hardwareAccelerated="true"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:label="详情">
+            <intent-filter>
+                <category android:name="hiker.intent.category.detail" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.picture.PictureOnlineActivity"
+            android:hardwareAccelerated="true"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:label="在线壁纸">
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.picture.PictureItemsActivity"
+            android:hardwareAccelerated="true"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:label="分类">
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.miniprogram.MiniProgramActivity"
+            android:hardwareAccelerated="true"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:label="小程序">
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.view.dialog.GlobalDialogActivity"
+            android:theme="@style/TranslucentFullScreenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="com.example.hikerview.utils.permission.XPermission$PermissionActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name="com.example.hikerview.ui.js.VideoRuleListActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.updaterecords.UpdateRecordsActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+        <activity
+            android:name="com.example.hikerview.ui.setting.MoreSettingActivity"
+            android:theme="@style/TranslucentFullScreenTheme" />
+
+        <activity
+            android:name="com.example.hikerview.ui.video.EmptyActivity"
+            android:launchMode="singleTask"
+            android:theme="@style/TranslucentFullScreenTheme" />
+
+        <activity
+            android:name="com.example.hikerview.ui.search.EmptySearchActivity"
+            android:theme="@style/TranslucentSearchTheme2" />
+        <activity
+            android:name="com.example.hikerview.ui.home.ResolveIntentActivity"
+            android:launchMode="singleTask"
+            android:theme="@style/TranslucentFullScreenTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:scheme="about" />
+                <data android:scheme="javascript" />
+                <data android:scheme="hiker" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="text/mht" />
+                <data android:mimeType="text/mhtml" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/gif" />
+                <data android:mimeType="image/jpeg" />
+                <data android:mimeType="image/png" />
+                <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="application/vnd.wap.xhtml+xml" />
+                <data android:mimeType="video/3gp" />
+                <data android:mimeType="video/mp4" />
+                <data android:mimeType="video/m3u8" />
+                <data android:mimeType="audio/mp3" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.BROWSABLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="http" />
+                <data android:scheme="file" />
+                <data android:scheme="https" />
+                <data android:scheme="content" />
+            </intent-filter>
+            <intent-filter android:label="用嗅觉打开">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.WEB_SEARCH" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.WEB_SEARCH" />
+                <action android:name="android.intent.action.MEDIA_SEARCH" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
+                <data android:pathPattern="/.*txt" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\.apk\.1" />
+                <data android:pathPattern=".*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\..*\..*\..*\..*\..*\.apk\.1" />
+                <data android:pathPattern=".*\..*\..*\..*\..*\..*\..*\..*\..*\..*\..*\..*\.apk\.1" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/html" />
+                <data android:pathPattern="/.*html" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/xhtml" />
+                <data android:pathPattern="/.*xhtml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/mht" />
+                <data android:pathPattern="/.*mht" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/vnd.wap.xhtml+xml" />
+                <data android:pathPattern="/.*xml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="audio/mp3" />
+                <data android:pathPattern="/.*mp3" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/mp4" />
+                <data android:pathPattern="/.*mp4" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/m3u8" />
+                <data android:pathPattern="/.*m3u8" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/3gp" />
+                <data android:pathPattern="/.*3gp" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/gif" />
+                <data android:pathPattern="/.*\\.gif" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/png" />
+                <data android:pathPattern="/.*\\.png" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/jpg" />
+                <data android:pathPattern="/.*\\.jpg" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/jpeg" />
+                <data android:pathPattern="/.*\\.jpeg" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="text/mht" />
+                <data android:mimeType="text/mhtml" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="application/vnd.wap.xhtml+xml" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.adblock.AdSettingsActivity"
+            android:label="Adblock Plus 订阅"
+            android:theme="@style/AppPreferenceTheme" />
+
+        <activity
+            android:name="com.example.hikerview.ui.browser.PictureListActivity"
+            android:theme="@style/FullScreenPicTheme">
+            <meta-data
+                android:name="android.notch_support"
+                android:value="true" />
+        </activity>
+
+        <activity
+            android:name="com.example.hikerview.ui.setting.TextSizeActivity"
+            android:theme="@style/HomeTheme"
+            android:label="网页文字大小"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustPan" />
+
+        <activity
+            android:name="com.example.hikerview.ui.setting.office.BaseSettingActivity"
+            android:theme="@style/SettingTheme"
+            android:label="设置"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden"/>
+
+        <meta-data
+            android:name="UMENG_APPKEY"
+            android:value="5aadd307f43e4828a7000121" />
+        <meta-data
+            android:name="UMENG_CHANNEL"
+            android:value="youtoo" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.hiker.youtoo.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
+
+        <service
+            android:name="com.qingfeng.clinglibrary.service.ClingUpnpService"
+            android:exported="false" />
+        <service
+            android:name="com.qingfeng.clinglibrary.service.SystemService"
+            android:exported="false" />
+
+        <service android:name="com.example.hikerview.ui.download.DownloadForegroundService" />
+
+        <service android:name="com.example.hikerview.ui.dlan.DlanForegroundService" />
+        <service android:name="com.example.hikerview.ui.video.MusicForegroundService" />
+        <service
+            android:name="com.tencent.smtt.export.external.DexClassLoaderProviderService"
+            android:label="dexopt"
+            android:process=":dexopt" >
+        </service>
+
+        <receiver
+            android:name="com.example.hikerview.ui.widget.SearchAppWidget"
+            android:label="搜索">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.hiker.youtoo.ui.widget.SEARCH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/search_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".ui.music.HeadsetButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission
+        android:name="android.permission.CALL_PHONE"
+        tools:node="remove" />
+    <!--下拉选择时弹出选择器-->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.SYSTEM_OVERLAY_WINDOW" />
+
+    <!--定位权限-->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--二维码扫描-->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    <uses-feature android:name="android.hardware.camera" />
+    <uses-feature android:name="android.hardware.camera.autofocus" />
+
+    <dist:module dist:instant="true" />
+
+</manifest>
