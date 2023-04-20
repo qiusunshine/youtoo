@@ -86,7 +86,7 @@ class MediaListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (media.getName().equals(MediaType.IMAGE.getName())) {
                 holder.imgView.setVisibility(View.VISIBLE);
                 Glide.with(context)
-                        .load(GlideUtil.getGlideUrl(baseUrl, list.get(position).getUrl()))
+                        .load(GlideUtil.getGlideUrl(baseUrl, GlideUtil.getImageUrl(list.get(position).getUrl())))
                         .apply(options)
                         .into(holder.imgView);
             } else {

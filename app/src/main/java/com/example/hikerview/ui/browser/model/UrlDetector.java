@@ -8,6 +8,7 @@ import com.example.hikerview.constants.Media;
 import com.example.hikerview.model.BigTextDO;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.browser.util.HttpRequestUtil;
+import com.example.hikerview.ui.download.VideoFormat;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.ToastMgr;
 
@@ -28,8 +29,9 @@ import java.util.regex.Pattern;
  * 时间：At 13:23
  */
 public class UrlDetector {
-    private static List<String> htmls = CollectionUtil.asList(".css", ".html", ".js", ".apk");
-    private static List<String> videos = CollectionUtil.asList(".mp4", "m3u8", ".flv", ".avi", ".3gp", "mpeg", ".wmv", ".mov", "rmvb", ".dat", "qqBFdownload", "mime=video%2F");
+    private static List<String> apps = CollectionUtil.asList(".css", ".html", ".js", ".apk", ".apks", ".apk.1", ".exe", ".zip", ".rar", ".7z", ".hap", ".mtz");
+    private static List<String> htmls = CollectionUtil.asList(".css", ".html", ".js", ".apk", ".exe");
+    private static List<String> videos = CollectionUtil.asList(".mp4", ".MP4", ".m3u8", ".flv", ".avi", ".3gp", "mpeg", ".wmv", ".mov", ".MOV", "rmvb", ".dat", ".mkv", "qqBFdownload", "mime=video%2F", "=video_mp4");
     private static List<String> musics = CollectionUtil.asList(".mp3", ".wav", ".ogg", ".flac", ".m4a");
     private static List<String> images = CollectionUtil.asList(".ico", ".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG", ".gif", ".GIF", ".webp");
     private static List<String> blockUrls = CollectionUtil.asList(".php?url=http", "/?url=http");
@@ -56,6 +58,10 @@ public class UrlDetector {
         } else if (url.contains("isVideo=true")) {
             Media mediaType = new Media(Media.VIDEO);
             mediaType.setType("isVideo");
+            return mediaType;
+        } else if (url.contains("isMusic=true")) {
+            Media mediaType = new Media(Media.MUSIC);
+            mediaType.setType("isMusic");
             return mediaType;
         }
         String needCheckUrl = DetectUrlUtil.getNeedCheckUrl(url);
@@ -90,8 +96,9 @@ public class UrlDetector {
                 return mediaType;
             }
         }
+        String pathUrl = needCheckUrl.split("\\?")[0];
         for (String html : htmls) {
-            if (needCheckUrl.contains(html)) {
+            if (pathUrl.contains(html)) {
                 Media mediaType = new Media(Media.HTML);
                 mediaType.setType(html);
                 return mediaType;
@@ -132,6 +139,11 @@ public class UrlDetector {
             mediaType.setType("html");
             return mediaType;
         }
+        if (url.contains("captcha")) {
+            Media mediaType = new Media(Media.OTHER);
+            mediaType.setType("captcha");
+            return mediaType;
+        }
         Media media = isVideo(url, requestHeaders);
         if (media != null) {
             return media;
@@ -145,11 +157,19 @@ public class UrlDetector {
         if (StringUtil.isEmpty(url)) {
             return false;
         }
+        if (url.startsWith("x5Play://")) {
+            return false;
+        }
         if (url.contains("@rule=") || url.contains("@lazyRule=")) {
             return false;
         }
         if (ImageUrlMapEnum.getIdByUrl(url) > 0) {
             return true;
+        }
+        for (String app : apps) {
+            if (url.endsWith(app)) {
+                return false;
+            }
         }
         url = StringUtil.removeDom(url);
         if (url.contains("ignoreImg=true")) {
@@ -167,8 +187,16 @@ public class UrlDetector {
         if (StringUtil.isEmpty(url)) {
             return false;
         }
-        if (url.contains("@rule=") || url.contains("@lazyRule=")) {
+        if (url.contains("@rule=") || url.contains("@lazyRule=") || url.contains("#ignoreMusic=true#")) {
             return false;
+        }
+        if (url.contains("isMusic=true")) {
+            return true;
+        }
+        for (String app : apps) {
+            if (url.endsWith(app)) {
+                return false;
+            }
         }
         url = StringUtil.removeDom(url);
         for (String image : musics) {
@@ -202,7 +230,11 @@ public class UrlDetector {
                 "#fullTheme#",
                 "#readTheme#",
                 "#gameTheme#",
-                "#noRefresh#"
+                "#noRefresh#",
+                "#background#",
+                "#autoCache#",
+                "#cacheOnly#",
+                "#originalSize#"
         };
         for (String tag : tagList) {
             url = StringUtils.replaceOnce(url, tag, "");
@@ -211,10 +243,13 @@ public class UrlDetector {
     }
 
     public static boolean isVideoOrMusic(String url) {
-        if (StringUtil.isEmpty(url) || url.contains("ignoreVideo=true")) {
+        if (StringUtil.isEmpty(url) || url.contains("ignoreVideo=true") || url.contains("#ignoreMusic=true#")) {
             return false;
         }
-        if (url.contains("isVideo=true")) {
+        if (url.contains("isVideo=true") || url.contains("isMusic=true")) {
+            return true;
+        }
+        if (url.startsWith("x5Play://")) {
             return true;
         }
         if (url.contains("@rule=") || url.contains("@lazyRule=")) {
@@ -222,7 +257,7 @@ public class UrlDetector {
         }
         if (url.startsWith("rtmp://")) {
             return true;
-        } else if (url.startsWith("rtsp://")) {
+        } else if (url.startsWith("rtsp://") || url.contains("video://")) {
             return true;
         }
         url = DetectUrlUtil.getNeedCheckUrl(url);
@@ -247,13 +282,8 @@ public class UrlDetector {
                 return false;
             }
         }
-        for (String html : htmls) {
-            if (url.contains(html)) {
-                return false;
-            }
-        }
-        for (String image : images) {
-            if (url.contains(image)) {
+        for (String app : apps) {
+            if (url.endsWith(app)) {
                 return false;
             }
         }
@@ -283,7 +313,11 @@ public class UrlDetector {
             if (videoInfo != null) {
                 VideoFormat videoFormat = videoInfo.getVideoFormat();
                 if (videoFormat != null) {
-                    return new Media(Media.VIDEO, videoFormat.getName().replace("player/m3u8", "m3u8"));
+                    if ("player/m3u8".equals(videoFormat.getName())) {
+                        return new Media(Media.VIDEO, "m3u8");
+                    } else if (isVideoOrMusic("." + videoFormat.getName())) {
+                        return new Media(Media.VIDEO, videoFormat.getName());
+                    }
                 }
             }
         } catch (Throwable ignored) {

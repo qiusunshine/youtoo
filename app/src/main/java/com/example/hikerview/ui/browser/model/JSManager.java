@@ -9,6 +9,7 @@ import com.annimon.stream.Collectors;
 import com.annimon.stream.Stream;
 import com.example.hikerview.model.BigTextDO;
 import com.example.hikerview.ui.Application;
+import com.example.hikerview.ui.browser.service.JSUpdaterKt;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.js.model.JsRule;
 import com.example.hikerview.utils.FileUtil;
@@ -16,6 +17,7 @@ import com.example.hikerview.utils.FilesInAppUtil;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.UriUtils;
 
+import org.adblockplus.libadblockplus.android.Utils;
 import org.litepal.LitePal;
 
 import java.io.File;
@@ -38,9 +40,18 @@ public class JSManager {
     private volatile static JSManager sInstance;
     private Map<String, Map<String, String>> jsLoader;
     private Map<String, Boolean> jsEnableMap = new HashMap<>();
+    private String greasyJsTemplate;
+    private Map<String, Boolean> greasyJSCache = new HashMap<>();
+    private Map<String, GreasyMeta> greasyMetaMap = new HashMap<>();
+    private VersionListener versionListener;
+
+    public interface VersionListener {
+        void change(String fileName, String version);
+    }
 
     private JSManager(Context context) {
         jsLoader = scanDomainToMap(context);
+        greasyJsTemplate = FilesInAppUtil.getAssetsString(context, "greasyfork.js");
     }
 
     public static JSManager instance(Context context) {
@@ -52,6 +63,14 @@ public class JSManager {
             }
         }
         return sInstance;
+    }
+
+    public void registerVersionListener(VersionListener versionListener) {
+        this.versionListener = versionListener;
+    }
+
+    public void unregisterVersionListener() {
+        this.versionListener = null;
     }
 
     private Map<String, Map<String, String>> scanDomainToMap(Context context) {
@@ -156,7 +175,7 @@ public class JSManager {
     }
 
 
-    private static String getNameFromFileName(String fileName) {
+    public static String getNameFromFileName(String fileName) {
         if (TextUtils.isEmpty(fileName)) {
             return fileName;
         }
@@ -207,6 +226,8 @@ public class JSManager {
                         initJsDir(new File(jsDirPath));
                         String jsFilePath = jsDirPath + File.separator + fileName + ".js";
                         File jsFile = new File(jsFilePath);
+                        String rule = Utils.escapeJavaScriptString(getNameFromFileName(fileName));
+                        BigTextDO.clearItems(rule);
                         if (jsFile.exists()) {
                             return jsFile.delete();
                         } else {
@@ -220,6 +241,10 @@ public class JSManager {
     }
 
     public boolean updateJs(String fileName, String js) {
+        return updateJs(fileName, js, null);
+    }
+
+    public boolean updateJs(String fileName, String js, String url) {
         if (TextUtils.isEmpty(js) || TextUtils.isEmpty(fileName)) {
             return true;
         }
@@ -236,13 +261,38 @@ public class JSManager {
         String jsDirPath = getJsDirPath();
         initJsDir(new File(jsDirPath));
         String jsFilePath = jsDirPath + File.separator + fileName + ".js";
+        greasyJSCache.remove(fileName);
         try {
             FileUtil.stringToFile(js, jsFilePath);
+            try {
+                if (versionListener != null) {
+                    versionListener.change(fileName, JSUpdaterKt.findVersion(js));
+                }
+            } catch (Throwable e) {
+                e.printStackTrace();
+            }
+            JSUpdaterKt.saveGreasyUpdateInfo(fileName, js, url);
             return true;
         } catch (IOException e) {
             e.printStackTrace();
         }
         return false;
+    }
+
+    public void reloadJSFile(String fileName) {
+        if (TextUtils.isEmpty(fileName)) {
+            return;
+        }
+        String js = loadContentFromFile(fileName);
+        if (TextUtils.isEmpty(js)) {
+            return;
+        }
+        greasyJSCache.remove(fileName);
+        try {
+            JSUpdaterKt.saveGreasyUpdateInfo(fileName, js, null);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public boolean hasJs(String fileName) {
@@ -340,19 +390,89 @@ public class JSManager {
                     //加载中
                     if (getPageEndByFileName(fileName)) {
                         //只在加载完成生效
-                        continue;
+                        //再检查一下油猴脚本的meta
+                        if (!shouldLoadAtStart(fileName)) {
+                            continue;
+                        }
                     }
                 }
-                if (TextUtils.isEmpty(jsLoader.get(dom).get(fileName))) {
-                    //没有初始化
-                    jsList.add(loadContentFromFile(fileName));
-                } else {
-                    jsList.add(jsLoader.get(dom).get(fileName));
-                }
+                jsList.add(getRealJS(dom, fileName));
             }
             return jsList;
         }
         return null;
+    }
+
+    private boolean shouldLoadAtStart(String fileName) {
+        if (greasyMetaMap.containsKey(fileName)) {
+            GreasyMeta meta = greasyMetaMap.get(fileName);
+            return meta != null && "document-start".equals(meta.getRunAt());
+        }
+        return false;
+    }
+
+    private String getRealJS(String dom, String fileName) {
+        String content = null;
+        try {
+            if (TextUtils.isEmpty(jsLoader.get(dom).get(fileName))) {
+                //没有初始化
+                content = loadContentFromFile(fileName);
+            } else {
+                content = jsLoader.get(dom).get(fileName);
+            }
+            if (!greasyJSCache.containsKey(fileName)) {
+                boolean isGreasy = content != null && !content.isEmpty() &&
+                        (content.contains("/UserScript==") || content.contains("==UserScript=="))
+                        && !content.contains("RequireStack =");
+                greasyJSCache.put(fileName, isGreasy);
+                if (isGreasy) {
+                    GreasyMeta meta = new GreasyMeta();
+                    String[] c = content.split("/UserScript==");
+                    if (c.length > 0 && c[0].contains("@run-at")) {
+                        if (c[0].contains("document-start")) {
+                            meta.setRunAt("document-start");
+                        } else if (c[0].contains("document-end")) {
+                            meta.setRunAt("document-end");
+                        } else if (c[0].contains("document-idle")) {
+                            meta.setRunAt("document-idle");
+                        }
+                    }
+                    greasyMetaMap.put(fileName, meta);
+                    JSUpdaterKt.checkUpdate(dom, fileName, false);
+                }
+            }
+            Boolean isGreasy = greasyJSCache.get(fileName);
+            if (isGreasy != null && isGreasy) {
+                //兼容油猴脚本
+                content = greasyJsTemplate
+                        .replace("${installUrl}", Utils.escapeJavaScriptString("hiker://jsfile/" + dom + "/" + fileName))
+                        .replace("${RULE_NAME}", Utils.escapeJavaScriptString(getNameFromFileName(fileName)));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return content;
+    }
+
+    public String getJSFileContent(String url) {
+        if (TextUtils.isEmpty(url)) {
+            return "";
+        }
+        try {
+            url = url.replace("hiker://jsfile/", "");
+            String[] s = url.split("/");
+            String dom = s[0];
+            String fileName = StringUtil.arrayToString(s, 1, "/");
+            String content = jsLoader.get(dom).get(fileName);
+            if (TextUtils.isEmpty(content)) {
+                //没有初始化
+                return loadContentFromFile(fileName);
+            }
+            return content;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "";
     }
 
     private void initJsDir(File jsDir) {
@@ -384,7 +504,7 @@ public class JSManager {
         return rulesPath + File.separator + "js";
     }
 
-    public String getFilePathByName(String fileName){
+    public String getFilePathByName(String fileName) {
         String jsDirPath = getJsDirPath();
         initJsDir(new File(jsDirPath));
         return jsDirPath + File.separator + fileName + ".js";
@@ -418,31 +538,10 @@ public class JSManager {
                     jsLoader.put(dom, jsFiles);
                 }
             }
-            return jsLoader.get(dom).get(fileName);
+            return text;
         } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
-    }
-
-    public String getTranslateJs() {
-        return "(function(){\n" +
-                "var script = document.createElement('script');\n" +
-                "script.src = 'https://haikuoshijie.cn/extfiles/translate/element.js';\n        " +
-                "document.getElementsByTagName('head')[0].appendChild(script);\n        " +
-                "var google_translate_element = document.createElement('div');\n        " +
-                "google_translate_element.id = 'google_translate_element';\n        " +
-                "google_translate_element.style = 'font-size: 16px;position:fixed; bottom:10px; right:10px; cursor:pointer;Z-INDEX: 99999;';\n        " +
-                "document.documentElement.appendChild(google_translate_element);\n        " +
-                "script = document.createElement('script');\n        " +
-                "script.innerHTML = \"function googleTranslateElementInit() {\" +\n            " +
-                "\"new google.translate.TranslateElement({\" +\n            " +
-                "\"layout: google.translate.TranslateElement.InlineLayout.SIMPLE,\" +\n            " +
-                "\"multilanguagePage: true,\" +\n            " +
-                "\"pageLanguage: 'auto',\" +\n            " +
-                "\"includedLanguages: 'zh-CN,zh-TW,en'\" +\n            " +
-                "\"}, 'google_translate_element');}\";\n        " +
-                "document.getElementsByTagName('head')[0].appendChild(script);" +
-                "})();";
     }
 }

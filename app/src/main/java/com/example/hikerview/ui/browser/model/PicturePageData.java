@@ -11,6 +11,7 @@ import java.util.List;
 public class PicturePageData {
     private List<String> pics;
     private int preSize;
+    private int pageNow;
 
     public PicturePageData(List<String> pics, String title) {
         this.pics = pics;
@@ -41,5 +42,13 @@ public class PicturePageData {
 
     public void setPreSize(int preSize) {
         this.preSize = preSize;
+    }
+
+    public int getPageNow() {
+        return pageNow;
+    }
+
+    public void setPageNow(int pageNow) {
+        this.pageNow = pageNow;
     }
 }

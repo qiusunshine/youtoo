@@ -1,21 +1,25 @@
 package com.example.hikerview.ui.miniprogram
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.text.TextUtils
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.JSONObject
 import com.annimon.stream.function.Consumer
+import com.example.hikerview.constants.ArticleColTypeEnum
 import com.example.hikerview.service.http.CodeUtil
 import com.example.hikerview.service.http.CodeUtil.OnCodeGetListener
 import com.example.hikerview.service.parser.HttpParser
 import com.example.hikerview.service.parser.JSEngine
 import com.example.hikerview.ui.Application
 import com.example.hikerview.ui.browser.util.UUIDUtil
+import com.example.hikerview.ui.home.ArticleListRuleEditActivity
 import com.example.hikerview.ui.home.model.ArticleListRule
 import com.example.hikerview.ui.miniprogram.data.RuleDTO
 import com.example.hikerview.ui.miniprogram.data.ViewDTO
 import com.example.hikerview.utils.*
+import com.example.hikerview.utils.encrypt.AesUtil
 import com.lxj.xpopup.XPopup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -29,12 +33,50 @@ import java.util.regex.Pattern
  * 时间：At 12:02
  */
 object MiniProgramRouter {
-    const val FILE = "mini-program.json"
-    const val VIEW_FILE = "mini-program-view.json"
-    const val STORE_FILE = "mini-program-store.json"
     var data: MutableList<RuleDTO> = ArrayList()
     var lastOverrideTime: Long = 0
     var lastOverrideUrl: String = ""
+    const val AES_KEY = "hk123kh"
+
+    /**
+     * 迁移数据
+     */
+    fun migrateFiles() {
+        migrateFile("mini-program.json")
+        migrateFile("mini-program-store.json")
+        migrateFile("mini-program-history.json")
+        migrateFile("mini-program-view.json")
+    }
+
+    private fun migrateFile(name: String) {
+        try {
+            val old =
+                UriUtils.getRootDir(Application.getContext()) + File.separator + name
+            val oldFile = File(old)
+            val path =
+                UriUtils.getRootDir(Application.getContext()) + File.separator + "rules" + File.separator + name
+            val newFile = File(path)
+            if (!newFile.exists() && oldFile.exists()) {
+                val json = FileUtil.fileToString(old)
+                FileUtil.stringToFile(json, path)
+                oldFile.delete()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun filePath(): String {
+        return UriUtils.getRootDir(Application.getContext()) + File.separator + "rules" + File.separator + "mini-program.json"
+    }
+
+    private fun storePath(): String {
+        return UriUtils.getRootDir(Application.getContext()) + File.separator + "rules" + File.separator + "mini-program-store.json"
+    }
+
+    private fun viewPath(): String {
+        return UriUtils.getRootDir(Application.getContext()) + File.separator + "rules" + File.separator + "mini-program-view.json"
+    }
 
     fun shouldOverrideUrlLoading(context: Context, url0: String, ua: String): Boolean {
         if (data.isNotEmpty()) {
@@ -96,7 +138,7 @@ object MiniProgramRouter {
         if (rs.size > 1) {
             url = JSEngine.getInstance().evalJS(JSEngine.getMyRule(ruleDTO) + rs[1], url)
         }
-        startMiniProgram(context, url, title, ruleDTO)
+        startMiniProgram(context, url, title, ruleDTO, true)
     }
 
     fun startMiniProgramBySearch(
@@ -104,36 +146,34 @@ object MiniProgramRouter {
         title: String,
         articleListRule: ArticleListRule
     ) {
-        val ruleDTO = toRuleDTO(articleListRule)
+        val ruleDTO = toRuleDTO(articleListRule, 2)
         ruleDTO.rule = articleListRule.searchFind
-        ruleDTO.url = HttpParser.replaceKey(articleListRule.search_url, title)
-        var nextRule = articleListRule.sdetail_find_rule
-        var nextColType = articleListRule.sdetail_col_type
-        if ("*" == nextRule) {
-            nextRule = articleListRule.detail_find_rule
-            nextColType = articleListRule.detail_col_type
-        }
-        ruleDTO.nextRule = nextRule
-        ruleDTO.nextColType = nextColType
-        if (!articleListRule.preRule.isNullOrEmpty()) {
-            //有预处理规则
-            if (ruleDTO.rule!!.startsWith("js:")) {
-                ruleDTO.rule =
-                    "js:\n" + articleListRule.preRule + "\n" + ruleDTO.rule!!.substring(3)
-            } else {
-                try {
-                    JSEngine.getInstance().parsePreRule(articleListRule)
-                } catch (e: java.lang.Exception) {
-                    e.printStackTrace()
-                    return
-                }
+        ruleDTO.col_type = ArticleColTypeEnum.MOVIE_1_VERTICAL_PIC.code
+        if (!ruleDTO.rule.isNullOrEmpty() && ruleDTO.rule?.startsWith("js:") != true) {
+            val ss = ruleDTO.rule!!.split(";")
+            val res = arrayOf("", "", "", "", "")
+            res[0] = ss[0]
+            res[1] = ss[1]
+            if (ss.size < 6 || ss[5].isEmpty() || ss[5] == "*") {
+                ruleDTO.col_type = ArticleColTypeEnum.TEXT_1.code
+            } else if (ss.size >= 6) {
+                res[2] = ss[5]
             }
+            if (ss.size >= 4) {
+                res[3] = ss[3]
+            }
+            if (ss.size >= 3) {
+                res[4] = ss[2]
+            }
+            ruleDTO.rule = res.joinToString(";")
         }
+        ruleDTO.url = HttpParser.replaceKey(articleListRule.search_url, title)
         startMiniProgram(
             context,
             ruleDTO.url!!,
             title,
-            ruleDTO
+            ruleDTO,
+            true
         )
     }
 
@@ -143,13 +183,91 @@ object MiniProgramRouter {
         title: String?,
         ruleDTO: RuleDTO
     ) {
+        startMiniProgram(context, url, title, ruleDTO, false)
+    }
+
+    fun startMiniProgram(
+        context: Context,
+        url: String,
+        title: String?,
+        ruleDTO: RuleDTO,
+        needPreParse: Boolean = false
+    ) {
+        startMiniProgram(context, url, title, ruleDTO, needPreParse, null, null)
+    }
+
+    fun startMiniProgram(
+        context: Context,
+        url: String,
+        title: String?,
+        ruleDTO: RuleDTO,
+        needPreParse: Boolean = false,
+        parentTitle: String? = null,
+        parentUrl: String? = null
+    ) {
+        startMiniProgram(context, url, title, ruleDTO, needPreParse, parentTitle, parentUrl, false)
+    }
+
+    fun startMiniProgram(
+        context: Context,
+        url: String,
+        title: String?,
+        ruleDTO: RuleDTO,
+        needPreParse: Boolean = false,
+        parentTitle: String? = null,
+        parentUrl: String? = null,
+        playLast: Boolean = false,
+        fromHome: Boolean = false
+    ) {
+        startMiniProgram(
+            context,
+            url,
+            title,
+            ruleDTO,
+            needPreParse,
+            parentTitle,
+            parentUrl,
+            playLast,
+            fromHome,
+            null
+        )
+    }
+
+    fun startMiniProgram(
+        context: Context,
+        url: String,
+        title: String?,
+        ruleDTO: RuleDTO,
+        needPreParse: Boolean = false,
+        parentTitle: String? = null,
+        parentUrl: String? = null,
+        playLast: Boolean = false,
+        fromHome: Boolean = false,
+        picUrl: String? = null
+    ) {
         val intent = Intent(context, MiniProgramActivity::class.java)
         ruleDTO.url = url
         val fileName = UUIDUtil.genUUID()
         DataTransferUtils.putCache(ruleDTO, fileName)
         intent.putExtra("rule", fileName)
         intent.putExtra("title", title)
-        context.startActivity(intent)
+        intent.putExtra("needPreParse", needPreParse)
+        intent.putExtra("playLast", playLast)
+        intent.putExtra("fromHome", fromHome)
+        parentTitle?.let {
+            intent.putExtra("parentTitle", it)
+        }
+        parentUrl?.let {
+            intent.putExtra("parentUrl", it)
+        }
+        if (!picUrl.isNullOrEmpty()) {
+            intent.putExtra("picUrl", picUrl)
+        }
+        if (context is Activity) {
+            context.startActivityForResult(intent, 911)
+        } else {
+            context.startActivity(intent)
+        }
     }
 
     fun startWebPage(context: Context, url: String, title: String) {
@@ -192,7 +310,8 @@ object MiniProgramRouter {
 
     fun loadConfigBackground(context: Context) {
         GlobalScope.launch(Dispatchers.IO) {
-            MiniProgramRouter.loadConfig(context) {
+            migrateFiles()
+            loadConfig(context) {
 
             }
         }
@@ -201,7 +320,7 @@ object MiniProgramRouter {
     /**
      * 从远程加载数据
      */
-    suspend fun loadConfig(context: Context, consumer: Consumer<MutableList<RuleDTO>>) {
+    private suspend fun loadConfig(context: Context, consumer: Consumer<MutableList<RuleDTO>>) {
         updateData(loadLocalConfig(context))
         val url = getSubscribeUrl(context)
         if (url.isNullOrEmpty()) {
@@ -231,8 +350,9 @@ object MiniProgramRouter {
                 }
                 val now = loadLocalConfig(context)
                 if (s != now) {
-                    saveLocalConfig(context, s)
-                    updateData(s)
+                    val s2 = mergeRemoteLocal(s, now)
+                    saveLocalConfig(context, s2)
+                    updateData(s2)
                 } else if (data.isEmpty()) {
                     updateData(now)
                 }
@@ -246,6 +366,35 @@ object MiniProgramRouter {
                 consumer.accept(data)
             }
         })
+    }
+
+    private fun mergeRemoteLocal(remote: String, local: String): String {
+        val remoteList = if (remote.isEmpty()) ArrayList<RuleDTO>() else JSON.parseArray(
+            remote,
+            RuleDTO::class.java
+        )
+        val localList = if (local.isEmpty()) ArrayList<RuleDTO>() else JSON.parseArray(
+            local,
+            RuleDTO::class.java
+        )
+        val size = remoteList.size
+        val map = HashMap<String, RuleDTO>()
+        for (ruleDTO in remoteList) {
+            ruleDTO.title?.let {
+                map.put(it, ruleDTO)
+            }
+        }
+        for (ruleDTO in localList) {
+            if (!map.containsKey(ruleDTO.title)) {
+                remoteList.add(0, ruleDTO)
+            }
+        }
+        return if (size == remoteList.size) {
+            //没增加
+            remote
+        } else {
+            JSON.toJSONString(remoteList)
+        }
     }
 
     suspend fun reloadConfig(
@@ -263,8 +412,7 @@ object MiniProgramRouter {
     fun clearConfig(context: Context) {
         PreferenceMgr.remove(context, "subscribe", "mini-program")
         PreferenceMgr.remove(context, "subscribe", "miniLastUpdateTime")
-        val path = UriUtils.getRootDir(context) + File.separator + FILE
-        File(path).delete()
+        File(filePath()).delete()
         data.clear()
     }
 
@@ -278,7 +426,7 @@ object MiniProgramRouter {
     }
 
     private fun loadLocalConfig(context: Context): String {
-        val path = UriUtils.getRootDir(context) + File.separator + FILE
+        val path = filePath()
         if (File(path).exists()) {
             return FileUtil.fileToString(path)
         }
@@ -286,7 +434,7 @@ object MiniProgramRouter {
     }
 
     fun saveLocalConfig(context: Context, str: String) {
-        val path = UriUtils.getRootDir(context) + File.separator + FILE
+        val path = filePath()
         FileUtil.stringToFile(str, path)
     }
 
@@ -297,6 +445,16 @@ object MiniProgramRouter {
         }
         try {
             data = JSON.parseArray(text, RuleDTO::class.java)
+            val iterator = data.iterator()
+            while (iterator.hasNext()) {
+                val it = iterator.next()
+                if (ArticleListRuleEditActivity.hasBlockDom(it.url) || ArticleListRuleEditActivity.hasBlockDom(
+                        it.interceptor
+                    )
+                ) {
+                    iterator.remove()
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -313,7 +471,7 @@ object MiniProgramRouter {
     }
 
     private fun loadMemoryList(context: Context): MutableList<ViewDTO> {
-        val path = UriUtils.getRootDir(context) + File.separator + VIEW_FILE
+        val path = viewPath()
         if (File(path).exists()) {
             return JSON.parseArray(FileUtil.fileToString(path), ViewDTO::class.java)
         }
@@ -322,6 +480,10 @@ object MiniProgramRouter {
 
     private fun memoryView(context: Context, ruleDTO: RuleDTO, url: String) {
         HeavyTaskUtil.executeNewTask {
+            val historyCount = PreferenceMgr.getInt(Application.getContext(), "historyCount", 300)
+            if (historyCount <= 0) {
+                return@executeNewTask
+            }
             val exist = loadMemoryList(context)
             for (viewDTO in exist) {
                 if (ruleDTO.title.equals(viewDTO.title)) {
@@ -336,84 +498,102 @@ object MiniProgramRouter {
             viewDTO.title = ruleDTO.title
             viewDTO.url = url
             exist.add(viewDTO)
-            val path = UriUtils.getRootDir(context) + File.separator + VIEW_FILE
-            FileUtil.stringToFile(JSON.toJSONString(exist), path)
+            FileUtil.stringToFile(JSON.toJSONString(exist), viewPath())
         }
     }
 
+    private fun saveStore(json: JSONObject) {
+        val t = AesUtil.encrypt(AES_KEY, json.toJSONString())
+        FileUtil.stringToFile(t, storePath())
+    }
+
+    private fun loadStore(): JSONObject {
+        val path = storePath()
+        return if (File(path).exists()) {
+            val text = FileUtil.fileToString(path)
+            if (text.isNullOrEmpty()) {
+                JSONObject()
+            } else if (text.startsWith("{") && text.endsWith("}")) {
+                //老数据，不解密
+                JSON.parseObject(text)
+            } else {
+                //需要解密
+                JSON.parseObject(AesUtil.decrypt(AES_KEY, text))
+            }
+        } else {
+            JSONObject()
+        }
+    }
+
+    private fun isStoreFileExist() = File(storePath()).exists()
+
     fun getItem(ruleName: String, key: String, defaultValue: String?): String? {
-        val path = UriUtils.getRootDir(Application.getContext()) + File.separator + STORE_FILE
-        if (File(path).exists()) {
-            val json = JSON.parseObject(FileUtil.fileToString(path))
-            if (json.containsKey(ruleName)) {
-                val obj = json.getJSONObject(ruleName)
-                if (obj.containsKey(key)) {
-                    return obj.getString(key)
-                }
+        val json = loadStore()
+        if (json.containsKey(ruleName)) {
+            val obj = json.getJSONObject(ruleName)
+            if (obj.containsKey(key)) {
+                return obj.getString(key)
             }
         }
         return defaultValue
     }
 
     fun setItem(ruleName: String, key: String, value: String) {
-        val path = UriUtils.getRootDir(Application.getContext()) + File.separator + STORE_FILE
-        if (File(path).exists()) {
-            val json = JSON.parseObject(FileUtil.fileToString(path))
-            if (json.containsKey(ruleName)) {
-                val obj = json.getJSONObject(ruleName)
-                obj[key] = value
-                FileUtil.stringToFile(json.toJSONString(), path)
-                return
-            }
-            json[ruleName] = JSONObject()
-            json.getJSONObject(ruleName)[key] = value
-            FileUtil.stringToFile(json.toJSONString(), path)
+        val json = loadStore()
+        if (json.containsKey(ruleName)) {
+            val obj = json.getJSONObject(ruleName)
+            obj[key] = value
+            saveStore(json)
             return
         }
-        val json = JSONObject()
         json[ruleName] = JSONObject()
         json.getJSONObject(ruleName)[key] = value
-        FileUtil.stringToFile(json.toJSONString(), path)
+        saveStore(json)
     }
 
     fun deleteItemByRule(ruleName: String) {
-        val path = UriUtils.getRootDir(Application.getContext()) + File.separator + STORE_FILE
-        if (File(path).exists()) {
-            val json = JSON.parseObject(FileUtil.fileToString(path))
+        if (isStoreFileExist()) {
+            val json = loadStore()
             if (json.containsKey(ruleName)) {
                 json.remove(ruleName)
-                FileUtil.stringToFile(json.toJSONString(), path)
+                saveStore(json)
                 return
             }
         }
     }
 
     fun clearItem(ruleName: String, key: String) {
-        val path = UriUtils.getRootDir(Application.getContext()) + File.separator + STORE_FILE
-        if (File(path).exists()) {
-            val json = JSON.parseObject(FileUtil.fileToString(path))
+        if (isStoreFileExist()) {
+            val json = loadStore()
             if (json.containsKey(ruleName)) {
                 val obj = json.getJSONObject(ruleName)
                 if (obj.containsKey(key)) {
                     obj.remove(key)
-                    FileUtil.stringToFile(json.toJSONString(), path)
+                    saveStore(json)
                 }
             }
         }
     }
 
-    fun toArticleListRule(ruleDTO: RuleDTO): ArticleListRule {
+    fun toArticleListRule(ruleDTO: RuleDTO, interceptorConvert: Boolean = false): ArticleListRule {
         val articleListRule = ArticleListRule()
         articleListRule.title = ruleDTO.title
         articleListRule.url = ruleDTO.url
         articleListRule.find_rule = ruleDTO.rule
         articleListRule.ua = ruleDTO.ua
+        articleListRule.col_type = ruleDTO.col_type
         articleListRule.pages = ruleDTO.pages
         articleListRule.params = ruleDTO.params
+        articleListRule.preRule = ruleDTO.preRule
+        articleListRule.detail_col_type = ruleDTO.nextColType
+        articleListRule.detail_find_rule = ruleDTO.nextRule
+        if (interceptorConvert) {
+            articleListRule.search_url = ruleDTO.interceptor
+        }
         return articleListRule
     }
 
-    fun toRuleDTO(articleListRule: ArticleListRule): RuleDTO {
+    fun toRuleDTO(articleListRule: ArticleListRule, withNextRule: Int = 0): RuleDTO {
         val ruleDTO = RuleDTO()
         ruleDTO.title = articleListRule.title
         ruleDTO.url = articleListRule.url
@@ -422,6 +602,28 @@ object MiniProgramRouter {
         ruleDTO.pages = articleListRule.pages
         ruleDTO.params = articleListRule.params
         ruleDTO.col_type = articleListRule.col_type
+        ruleDTO.preRule = articleListRule.preRule
+        if (StringUtil.isNotEmpty(articleListRule.search_url)
+            && articleListRule.search_url?.contains(
+                "**"
+            ) == false
+            && StringUtil.isEmpty(articleListRule.searchFind)
+        ) {
+            ruleDTO.interceptor = articleListRule.search_url
+        }
+        if (withNextRule == 1) {
+            ruleDTO.nextRule = articleListRule.detail_find_rule
+            ruleDTO.nextColType = articleListRule.detail_col_type
+        } else if (withNextRule == 2) {
+            var nextRule = articleListRule.sdetail_find_rule
+            var nextColType = articleListRule.sdetail_col_type
+            if ("*" == nextRule) {
+                nextRule = articleListRule.detail_find_rule
+                nextColType = articleListRule.detail_col_type
+            }
+            ruleDTO.nextRule = nextRule
+            ruleDTO.nextColType = nextColType
+        }
         return ruleDTO
     }
 
@@ -453,7 +655,8 @@ object MiniProgramRouter {
                             context,
                             u,
                             ruleDTO.title ?: "",
-                            ruleDTO.copy()
+                            ruleDTO.copy(),
+                            true
                         )
                     }.show()
             } else {
@@ -477,8 +680,40 @@ object MiniProgramRouter {
                 context,
                 ruleDTO.url!!,
                 ruleDTO.title ?: "",
-                ruleDTO.copy()
+                ruleDTO.copy(),
+                true,
+                null,
+                null,
+                playLast = false,
+                fromHome = true
             )
         }
+    }
+
+    fun saveRulesToLocal(context: Context, rules: MutableList<RuleDTO>) {
+        if (rules.isEmpty()) {
+            return
+        }
+        val needAddList = ArrayList<RuleDTO>()
+        for (rule in rules) {
+            if (!replaceRule(rule)) {
+                needAddList.add(rule)
+            }
+        }
+        if (needAddList.isNotEmpty()) {
+            data.addAll(needAddList)
+        }
+        saveLocalConfig(context, JSON.toJSONString(data))
+    }
+
+    private fun replaceRule(rule: RuleDTO): Boolean {
+        for (indexedValue in data.withIndex()) {
+            if (rule.title == indexedValue.value.title) {
+                data.removeAt(indexedValue.index)
+                data.add(indexedValue.index, rule)
+                return true
+            }
+        }
+        return false
     }
 }

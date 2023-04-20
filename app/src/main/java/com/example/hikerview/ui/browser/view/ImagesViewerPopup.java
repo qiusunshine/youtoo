@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.annimon.stream.function.Consumer;
 import com.example.hikerview.R;
 import com.example.hikerview.ui.view.PopImageLoader;
+import com.example.hikerview.ui.view.popup.MyXpopup;
 import com.example.hikerview.utils.ToastMgr;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.core.BottomPopupView;
@@ -61,7 +62,7 @@ public class ImagesViewerPopup extends BottomPopupView {
         adapter = new ImagesViewerAdapter(activity, list, new ImagesViewerAdapter.OnClickListener() {
             @Override
             public void click(ImageView view, int pos) {
-                new XPopup.Builder(getContext())
+                new MyXpopup().Builder(getContext())
                         .asImageViewer(view, list.get(pos), new PopImageLoader(view, null))
                         .show();
             }

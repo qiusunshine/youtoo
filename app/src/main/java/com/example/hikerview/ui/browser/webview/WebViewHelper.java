@@ -38,7 +38,12 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.webkit.ServiceWorkerClientCompat;
+import androidx.webkit.ServiceWorkerControllerCompat;
+import androidx.webkit.WebViewFeature;
 
+import com.alibaba.fastjson.JSON;
+import com.annimon.stream.Stream;
 import com.example.hikerview.R;
 import com.example.hikerview.constants.Media;
 import com.example.hikerview.constants.MediaType;
@@ -57,14 +62,19 @@ import com.example.hikerview.event.web.OnProgressChangedEvent;
 import com.example.hikerview.event.web.OnSetWebTitleEvent;
 import com.example.hikerview.event.web.OnShowCustomViewEvent;
 import com.example.hikerview.event.web.OnShowFileChooserEvent;
+import com.example.hikerview.model.BigTextDO;
+import com.example.hikerview.ui.Application;
 import com.example.hikerview.ui.browser.ViaInterface;
+import com.example.hikerview.ui.browser.data.DomainConfigKt;
 import com.example.hikerview.ui.browser.model.AdBlockModel;
 import com.example.hikerview.ui.browser.model.AdUrlBlocker;
 import com.example.hikerview.ui.browser.model.DetectedMediaResult;
 import com.example.hikerview.ui.browser.model.DetectorManager;
-import com.example.hikerview.ui.browser.model.JSManager;
+import com.example.hikerview.ui.browser.model.JSMenu;
 import com.example.hikerview.ui.browser.model.UAModel;
 import com.example.hikerview.ui.browser.model.VideoTask;
+import com.example.hikerview.ui.browser.service.BrowserProxy;
+import com.example.hikerview.ui.browser.service.DomainConfigService;
 import com.example.hikerview.ui.browser.view.BaseWebViewActivity;
 import com.example.hikerview.ui.home.ArticleListRuleEditActivity;
 import com.example.hikerview.ui.js.JSEditActivity;
@@ -74,6 +84,7 @@ import com.example.hikerview.ui.setting.model.SettingConfig;
 import com.example.hikerview.ui.view.HorizontalWebView;
 import com.example.hikerview.ui.view.popup.InputPopup;
 import com.example.hikerview.utils.FilesInAppUtil;
+import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.PreferenceMgr;
 import com.example.hikerview.utils.StatusBarCompatUtil;
 import com.example.hikerview.utils.StringUtil;
@@ -81,16 +92,18 @@ import com.example.hikerview.utils.ThreadTool;
 import com.google.android.material.snackbar.BaseTransientBottomBar;
 import com.google.android.material.snackbar.Snackbar;
 import com.lxj.xpopup.XPopup;
+import com.lxj.xpopup.impl.ConfirmPopupView;
 
+import org.adblockplus.libadblockplus.android.Utils;
 import org.greenrobot.eventbus.EventBus;
+import org.jetbrains.annotations.NotNull;
+import org.joor.Reflect;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import ren.yale.android.cachewebviewlib.WebViewCacheInterceptorInst;
@@ -101,7 +114,7 @@ import timber.log.Timber;
  * 日期：On 2020/4/5
  * 时间：At 13:03
  */
-public class WebViewHelper implements HorizontalWebView.onLoadListener {
+public class WebViewHelper implements HorizontalWebView.onLoadListener, ServiceWorkerInterceptor {
     // decisions
     public final static String RESPONSE_CHARSET_NAME = "UTF-8";
     public final static String RESPONSE_MIME_TYPE = "text/plain";
@@ -110,7 +123,6 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
     private static final String TAG = "WebViewHelper";
     private WebViewClient webViewClient;
     private WebChromeClient webChromeClient;
-    private boolean isConfirm, isAlert;
     private HorizontalWebView horizontalWebView;
     private String systemUA = "";
     private boolean hasSetAppBarColor = false;
@@ -121,10 +133,13 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
     private AtomicBoolean hasLoadJsOnProgress = new AtomicBoolean(false);
     private AtomicBoolean hasLoadJsOnPageEnd = new AtomicBoolean(false);
     private Map<String, Map<String, String>> requestHeaderMap = new HashMap<>();
-    private static final Set<String> disallowLocationSet = new HashSet<>();
-    public static final Set<String> disallowAppSet = new HashSet<>();
+    private static final Map<String, Integer> disallowLocationSet = new HashMap<>();
+    public static final Map<String, Integer> disallowAppSet = new HashMap<>();
     private boolean adBlockMarking = false;
     private AdblockHolder adblockHolder;
+    private List<JsResult> jsResults = new ArrayList<>();
+    public static final WebResourceResponse RESPONSE_IGNORE =
+            new WebResourceResponse(RESPONSE_MIME_TYPE, RESPONSE_CHARSET_NAME, null);
 
     public Map<String, Map<String, String>> getRequestHeaderMap() {
         return requestHeaderMap;
@@ -137,6 +152,36 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
         return null;
     }
 
+
+    public List<String> getGreasyForkRules() {
+        if (jsBridgeHolder == null) {
+            return new ArrayList<>();
+        }
+        return new ArrayList<>(jsBridgeHolder.getGreasyForkMenuMap().keySet());
+    }
+
+    public List<String> getGreasyForkMenus(String rule) {
+        List<JSMenu> menu = jsBridgeHolder.getGreasyForkMenuMap().get(rule);
+        if (menu != null) {
+            return Stream.of(menu).map(JSMenu::getName).toList();
+        }
+        return new ArrayList<>();
+    }
+
+    public void triggerGreasyForkMenu(String rule, String menu) {
+        List<JSMenu> jsMenus = jsBridgeHolder.getGreasyForkMenuMap().get(rule);
+        if (jsMenus != null) {
+            for (JSMenu jsMenu : jsMenus) {
+                if (menu.equals(jsMenu.getName())) {
+                    if (StringUtil.isNotEmpty(jsMenu.getFunc())) {
+                        horizontalWebView.evaluateJavascript("window['" + jsMenu.getFunc() + "']()", null);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
     public WeakReference<BaseWebViewActivity> getReference() {
         return reference;
     }
@@ -144,6 +189,16 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
     public void updateProperties(BaseWebViewActivity activity) {
         if (reference != null) {
             this.reference.clear();
+        }
+        if (!jsResults.isEmpty()) {
+            for (JsResult jsResult : jsResults) {
+                try {
+                    jsResult.cancel();
+                } catch (Throwable e) {
+                    e.printStackTrace();
+                }
+            }
+            jsResults.clear();
         }
         this.reference = new WeakReference<>(activity);
         InternalContext.getInstance().setBaseContext(activity);
@@ -290,6 +345,11 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                     return null;
                 }
             }
+
+            @Override
+            public void openThirdApp(String scheme) {
+
+            }
         };
     }
 
@@ -397,7 +457,9 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
         }
         String useUa = PreferenceMgr.getString(activity, "vip", "ua", null);
         if (StringUtil.isNotEmpty(useUa)) {
-            webSettings.setUserAgentString(StringUtil.replaceLineBlank(useUa));
+            String ua = StringUtil.replaceLineBlank(useUa);
+            webSettings.setUserAgentString(ua);
+            horizontalWebView.setUa(ua);
         }
         UAModel.setUseUa(useUa);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -422,6 +484,8 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
 //            webSettings.setDefaultZoom(WebSettings.ZoomDensity.MEDIUM);
 //        }
 
+        addServiceWorkerClient(this);
+//        WebView.setWebContentsDebuggingEnabled(true);
     }
 
     private void initDownloadListener() {
@@ -479,12 +543,49 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (adBlockMarking) {
                     return true;
                 }
-                HorizontalWebView webView = MultiWindowManager.instance(reference.get()).addWebView(null, true, view);
-                CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                WebView webView1;
+                String ua = view.getSettings().getUserAgentString();
+                if (StringUtil.isEmpty(ua) || ua.contains("Android")) {
+                    //为啥不都拦截shouldOverrideUrlLoading的方法来打开新窗口呢
+                    //因为他娘的POST请求的新窗口不走shouldOverrideUrlLoading，且shouldInterceptRequest无法获取参数
+                    HorizontalWebView webView = MultiWindowManager.instance(reference.get()).addWebView(null, true, view);
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                    EventBus.getDefault().post(new OnCreateWindowEvent(webView));
+                    webView1 = webView;
+                } else {
+                    //不直接new一个的原因是有些网站（如哔哩）shouldOverrideUrlLoading的requestHeader会携带User-Agent
+                    // 且为安卓UA，即使设置了PC的UA，估计是内核bug
+                    webView1 = new WebView(view.getContext());
+                    String referer = myUrl;
+                    webView1.setWebViewClient(new WebViewClient() {
+                        @Override
+                        public boolean shouldOverrideUrlLoading(WebView view1, WebResourceRequest request) {
+                            HorizontalWebView webView = MultiWindowManager.instance(reference.get()).addWebView(null, true, view);
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                            String url = request.getUrl().toString();
+                            Map<String, String> headers = new HashMap<>();
+                            headers.put("Referer", referer);
+                            if (request.getRequestHeaders() != null && request.getRequestHeaders().containsKey("User-Agent")) {
+                                request.getRequestHeaders().remove("User-Agent");
+                                for (Map.Entry<String, String> entry : request.getRequestHeaders().entrySet()) {
+                                    headers.put(entry.getKey(), entry.getValue());
+                                }
+                            }
+                            webView.loadUrl(url, headers);
+                            EventBus.getDefault().post(new OnCreateWindowEvent(webView));
+                            try {
+                                view1.onPause();
+                                view1.destroy();
+                            } catch (Throwable e) {
+                                e.printStackTrace();
+                            }
+                            return true;
+                        }
+                    });
+                }
                 WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-                transport.setWebView(webView);
+                transport.setWebView(webView1);
                 resultMsg.sendToTarget();
-                EventBus.getDefault().post(new OnCreateWindowEvent(webView));
                 return true;
             }
 
@@ -494,6 +595,7 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (horizontalWebView.isUsed()) {
                     EventBus.getDefault().post(new OnSetWebTitleEvent(title));
                 }
+                injectThemeCss(view);
             }
 
             @Override
@@ -502,14 +604,20 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (!(webView instanceof HorizontalWebView)) {
                     return;
                 }
-                adblockHolder.injectJsOnProgress();
+                if (!ArticleListRuleEditActivity.hasBlockDom(webView.getUrl()) && !DomainConfigKt.isDisableAdBlock(webView.getUrl())) {
+                    adblockHolder.injectJsOnProgress();
+                }
                 HorizontalWebView webViewT = (HorizontalWebView) webView;
                 if (!hasLoadJsOnProgress.get() && i >= 40 && i < 100) {
+                    injectThemeCss(webView);
                     hasLoadJsOnProgress.set(true);
                     if (webViewT.isUseDevMode()) {
                         webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(reference.get(), "vConsole.js"), null);
                     }
                     loadAllJs(webViewT, webViewT.getUrl(), false);
+                }
+                if (i < 40) {
+                    injectThemeCss(webView);
                 }
                 if (!webViewT.isUsed()) {
                     return;
@@ -548,25 +656,39 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (!view.isUsed()) {
                     return super.onJsAlert(webView, url, message, result);
                 }
-                isAlert = false;
                 if (reference.get() == null || reference.get().isFinishing()) {
                     result.cancel();
                     return true;
                 }
-                Snackbar.make(reference.get().getSnackBarBg(), message, 4750)
-                        .setAction("确定", v -> {
-                            isAlert = true;
+                JsResultHolder jsResultHolder = new JsResultHolder();
+                jsResults.add(result);
+                ConfirmPopupView popupView = new XPopup.Builder(reference.get())
+                        .asConfirm("网页提示", message, () -> {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
                             result.confirm();
-                        }).addCallback(new Snackbar.Callback() {
-                    @Override
-                    public void onDismissed(Snackbar transientBottomBar, int event) {
-                        if (!isAlert) {
+                        }, () -> {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
+                            result.cancel();
+                        });
+                Reflect.on(popupView).set("dismissWithRunnable", (Runnable) () -> {
+                    try {
+                        if (!jsResultHolder.consumed) {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
                             result.cancel();
                         }
-                        super.onDismissed(transientBottomBar, event);
+                    } catch (Throwable e) {
+                        e.printStackTrace();
                     }
-                }).show();
+                });
+                popupView.show();
                 return true;
+            }
+
+            final class JsResultHolder {
+                boolean consumed;
             }
 
             @Override
@@ -578,16 +700,34 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (!view.isUsed()) {
                     return super.onJsConfirm(webView, url, message, result);
                 }
-                isConfirm = false;
                 if (reference.get() == null || reference.get().isFinishing()) {
                     result.cancel();
                     return true;
                 }
-
-                new XPopup.Builder(reference.get())
-                        .dismissOnBackPressed(false)
-                        .dismissOnTouchOutside(false)
-                        .asConfirm("网页提示", message, result::confirm, result::cancel).show();
+                JsResultHolder jsResultHolder = new JsResultHolder();
+                jsResults.add(result);
+                ConfirmPopupView popupView = new XPopup.Builder(reference.get())
+                        .asConfirm("网页提示", message, () -> {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
+                            result.confirm();
+                        }, () -> {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
+                            result.cancel();
+                        });
+                Reflect.on(popupView).set("dismissWithRunnable", (Runnable) () -> {
+                    try {
+                        if (!jsResultHolder.consumed) {
+                            jsResultHolder.consumed = true;
+                            jsResults.remove(result);
+                            result.cancel();
+                        }
+                    } catch (Throwable e) {
+                        e.printStackTrace();
+                    }
+                });
+                popupView.show();
                 return true;
             }
 
@@ -629,7 +769,8 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
             @Override
             public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
                 try {
-                    Timber.d(consoleMessage.message(), consoleMessage.messageLevel(), consoleMessage.lineNumber(), consoleMessage.sourceId());
+                    Timber.d(consoleMessage.message() + ", " + consoleMessage.messageLevel() + ", " +
+                            consoleMessage.lineNumber() + ", " + consoleMessage.sourceId());
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -657,10 +798,13 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 if (geolocationGranted) {
                     Timber.d("onGeolocationPermissionsShowPrompt, geolocationGranted");
                     callback.invoke(origin, geolocationGranted, false);
+                } else if (DomainConfigKt.isAllowGetLocation(origin)) {
+                    callback.invoke(origin, true, false);
                 } else if (reference.get() != null) {
                     geolocationTemp = false;
                     String dom = StringUtil.getDom(origin);
-                    if (disallowLocationSet.contains(dom)) {
+                    Integer disallowLocation = disallowLocationSet.get(dom);
+                    if ((disallowLocation != null && disallowLocation > 1) || DomainConfigKt.isDisableGetLocation(dom)) {
                         Timber.d("onGeolocationPermissionsShowPrompt, disallowLocationSet.contains: %s", origin);
                         geolocationGranted = geolocationTemp;
                         callback.invoke(origin, geolocationTemp, false);
@@ -676,18 +820,19 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                                     }
                                 }
                                 geolocationTemp = true;
+                                DomainConfigService.INSTANCE.allowGetLocation(origin);
                             }).addCallback(new BaseTransientBottomBar.BaseCallback<Snackbar>() {
-                        @Override
-                        public void onDismissed(Snackbar transientBottomBar, int event) {
-                            Timber.d("onGeolocationPermissionsShowPrompt, onDismissed: %s", geolocationTemp);
-                            geolocationGranted = geolocationTemp;
-                            callback.invoke(origin, geolocationTemp, false);
-                            if (!geolocationTemp) {
-                                disallowLocationSet.add(dom);
-                            }
-                            super.onDismissed(transientBottomBar, event);
-                        }
-                    }).show();
+                                @Override
+                                public void onDismissed(Snackbar transientBottomBar, int event) {
+                                    Timber.d("onGeolocationPermissionsShowPrompt, onDismissed: %s", geolocationTemp);
+                                    geolocationGranted = geolocationTemp;
+                                    callback.invoke(origin, geolocationTemp, false);
+                                    if (!geolocationTemp) {
+                                        disallowLocationSet.put(dom, disallowLocation == null ? 1 : 2);
+                                    }
+                                    super.onDismissed(transientBottomBar, event);
+                                }
+                            }).show();
                 } else {
                     super.onGeolocationPermissionsShowPrompt(origin, callback);
                 }
@@ -702,8 +847,111 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
         horizontalWebView.setWebChromeClient(webChromeClient);
     }
 
+    public static void injectThemeCss(WebView view) {
+        String eye = PreferenceMgr.getString(view.getContext(), "eye", null);
+        if (StringUtil.isEmpty(eye)) {
+            return;
+        }
+        view.post(() -> view.evaluateJavascript(getThemeInjectCss(eye), null));
+    }
+
+    public static void clearThemeCss(WebView view) {
+        ThreadTool.INSTANCE.runOnUI(() -> view.evaluateJavascript("window.injectCss0101 = null;if(document.getElementById('link_extra_css_id')) document.getElementsByTagName('head')[0].removeChild(document.getElementById('link_extra_css_id'));", null));
+    }
+
+    public static int getDefaultThemeColor(Context context) {
+        String eye = PreferenceMgr.getString(context == null ? Application.getContext() : context, "eye", null);
+        if (StringUtil.isNotEmpty(eye)) {
+            return Color.parseColor(eye);
+        } else {
+            return Color.WHITE;
+        }
+    }
+
+    private static String mapAColor(String color) {
+        switch (color) {
+            case "#F9F9F9":
+            case "#DDDDDD":
+                return "#67A1E1";
+            case "#F4E8D0":
+                return "#AC8A65";
+            case "#D0E8D0":
+                return "#67A363";
+            case "#BDD6EC":
+                return "#659FDE";
+            case "#CEC9E7":
+                return "#9686DE";
+            case "#343C3E":
+                return "#3D77B6";
+            default:
+                return "#4B4B4B";
+        }
+    }
+
+    private static String mapDivColor(String color) {
+        switch (color) {
+            case "#343C3E":
+                return "#AAB7BD";
+            default:
+                return "#444444";
+        }
+    }
+
+    public static String getThemeInjectCss(String color) {
+        StringBuilder buffer = new StringBuilder();
+//        String color = "#D3E1D0";
+        buffer.append("html,body,table,tr,td,th,tbody,form,article,dt,ul,ol,li,dl,dd,section,footer,nav,strong,aside,header,label,address,bdo,big,blockquote,caption,em,center,cite,dialog,dir,fieldset,figcaption,figure,main,pre,small,h1,h2,h3,h4,h5,h6{background:");
+        buffer.append(color);
+        buffer.append("!important;background-image:none!important;background-color:");
+        buffer.append(color);
+        buffer.append("!important;");
+        String divColor = mapDivColor(color);
+        if (StringUtil.isEmpty(divColor)) {
+            buffer.append("}");
+        } else {
+            buffer.append("color: ").append(divColor).append("!important;}")
+                    .append("p,div{color:").append(divColor).append("!important;}");
+        }
+        buffer.append("a{color:").append(mapAColor(color)).append("!important;}");
+        buffer.append("div,p,font{background:transparent!important;background-color:transparent!important;}");
+        buffer.append("html,body,a,div,p,img,textarea{-webkit-touch-callout:text !important;-webkit-user-select:text !important;user-select:text !important;}");
+        return "function addCss11(styles) {\n" +
+                "          let css;\n" +
+                "          styles = styles.replace(/\\n+\\s*/g, ' ');\n" +
+                "          css = document.createElement('style');\n" +
+                "          css.id = 'link_extra_css_id';\n" +
+                "          if (css.styleSheet) css.styleSheet.cssText = styles;\n" +
+                "          // Support for IE\n" +
+                "          else css.appendChild(document.createTextNode(styles)); // Support for the rest\n" +
+                "          css.type = 'text/css';\n" +
+                "          document.getElementsByTagName('head')[0].appendChild(css);\n" +
+                "        }\n" +
+                "function injectCss0(){try{\n" +
+                "   //console.log('injectCss0: ' + location.host + '--->' + window.injectCss0101);\n" +
+                "   if(window.injectCss0101 > 60) {\n" +
+                "       window.injectCss0101 = null;\n" +
+                "       return;\n" +
+                "   }\n" +
+                "   window.injectCss0101++;\n" +
+                "   let css0001 = \"" + Utils.escapeJavaScriptString(buffer.toString()) + "\";\n" +
+                "   if(!document.getElementById('link_extra_css_id')) addCss11(css0001);\n" +
+                "   } catch(e){ console.log('injectCss0: ' + e.toString()); }\n" +
+                "   setTimeout(injectCss0, 50);\n" +
+                "}\n" +
+                "if(!window.injectCss0101){\n" +
+                "   window.injectCss0101 = 1;\n" +
+                "   injectCss0();\n" +
+                "}";
+    }
+
     private void initWebViewClient() {
         webViewClient = new WebViewClient() {
+            @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                injectThemeCss(view);
+            }
+
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.proceed();
@@ -753,6 +1001,9 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 myUrl = s;
                 geolocationGranted = false;
                 requestHeaderMap.clear();
+                if (jsBridgeHolder != null) {
+                    jsBridgeHolder.clearGreasyForkMenu();
+                }
                 Timber.d("onPageStarted: %s", s);
                 if (!(webView instanceof HorizontalWebView)) {
                     super.onPageStarted(webView, s, bitmap);
@@ -763,6 +1014,10 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                     super.onPageStarted(webView, s, bitmap);
                     return;
                 }
+                if (view.getParentWebView() != null) {
+                    view.getParentWebView().setLastViewedUrl(s);
+                }
+                injectThemeCss(webView);
                 if (adblockHolder.isLoading()) {
                     adblockHolder.stopAbpLoading();
                 }
@@ -798,14 +1053,45 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                     return;
                 }
                 HorizontalWebView webViewT = (HorizontalWebView) webView;
+                if (webViewT.isNeedClearHistory()) {
+                    webViewT.setNeedClearHistory(false);
+                    webViewT.clearHistory();
+                }
+                injectThemeCss(webView);
                 if (!hasLoadJsOnPageEnd.get()) {
                     hasLoadJsOnPageEnd.set(true);
                     loadAllJs(webViewT, webViewT.getUrl(), true);
-                    if (webViewT.isUseTranslate()) {
-                        webViewT.evaluateJavascript(JSManager.instance(reference.get()).getTranslateJs(), null);
-                    }
                     if (webViewT.isUseDevMode()) {
                         webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(reference.get(), "vConsole.js"), null);
+                    }
+                    if (SettingConfig.saveForm) {
+                        webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(reference.get(), "forminput.js"), null);
+                        HeavyTaskUtil.executeNewTask(() -> {
+                            Map<String, String> formData = BigTextDO.getFormInputs(s);
+                            if (formData != null && !formData.isEmpty()) {
+                                String d = JSON.toJSONString(formData);
+                                String js = "(function(){\n" +
+                                        "function aaaa1(){\n" +
+                                        "   let json1230 = JSON.parse(\"" + Utils.escapeJavaScriptString(d) + "\");\n" +
+                                        "   for(let key of Object.keys(json1230)) {\n" +
+                                        "    let v = json1230[key];\n" +
+                                        "    let b = key.split(',');\n" +
+                                        "    let index = (b.length > 1 ? parseInt(b[1]) : 0) || 0;\n" +
+                                        "    if(key.startsWith('#')) {\n" +
+                                        "      document.querySelectorAll(b[0])[index].value = v;\n" +
+                                        "    } else if(key.startsWith('tagInput,')) {\n" +
+                                        "      document.querySelectorAll('input')[index].value = v;\n" +
+                                        "    } else {\n" +
+                                        "      document.querySelectorAll('input[name=' + b[0] + ']')[index].value = v;\n" +
+                                        "    }\n" +
+                                        "   }\n" +
+                                        "}\n" +
+                                        "aaaa1();\n" +
+                                        "setTimeout(aaaa1, 500);\n" +
+                                        "})();";
+                                webView.post(() -> webView.evaluateJavascript(js, null));
+                            }
+                        });
                     }
                 }
                 if (!webViewT.isUsed()) {
@@ -818,47 +1104,11 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView webView, WebResourceRequest request) {
-                Timber.d("shouldInterceptRequest: request:%s", request.getUrl().toString());
-                if (!(webView instanceof HorizontalWebView)) {
-                    return super.shouldInterceptRequest(webView, request);
+                WebResourceResponse response = shouldInterceptRequest0(webView, request);
+                if (response != null) {
+                    return response;
                 }
-                HorizontalWebView view = (HorizontalWebView) webView;
-                if (!view.isUsed()) {
-                    return super.shouldInterceptRequest(webView, request);
-                }
-                String url = request.getUrl().toString();
-                requestHeaderMap.put(url, request.getRequestHeaders());
-                if (ArticleListRuleEditActivity.hasBlockDom(lastDom)) {
-                    DetectorManager.getInstance().addTask(new VideoTask(request.getRequestHeaders(), request.getMethod(), url, url));
-                    return WebViewCacheInterceptorInst.getInstance().interceptRequest(request);
-                }
-                long id = AdUrlBlocker.instance().shouldBlock(lastDom, url);
-                if (id >= 0) {
-                    DetectedMediaResult mediaResult = new DetectedMediaResult(url);
-                    mediaResult.setMediaType(new Media(Media.BLOCK, id + ""));
-                    DetectorManager.getInstance().addMediaResult(mediaResult);
-                    return new WebResourceResponse(null, null, null);
-                }
-                if (reference.get() == null || reference.get().isFinishing()) {
-                    return super.shouldInterceptRequest(webView, request);
-                }
-
-                try {
-                    final AdblockHolder.AbpShouldBlockResult abpBlockResult = adblockHolder.shouldAbpBlockRequest(request);
-                    // if url should be blocked, we are not performing any further actions
-                    if (AdblockHolder.AbpShouldBlockResult.BLOCK_LOAD.equals(abpBlockResult)) {
-                        if (reference.get() == null || reference.get().isFinishing()) {
-                            return super.shouldInterceptRequest(webView, request);
-                        }
-                        return WebResponseResult.BLOCK_LOAD;
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-                DetectorManager.getInstance().addTask(new VideoTask(request.getRequestHeaders(), request.getMethod(), request.getUrl().toString(), request.getUrl().toString()));
-                return WebViewCacheInterceptorInst.getInstance().interceptRequest(request);
-//                return super.shouldInterceptRequest(webView, request);
+                return super.shouldInterceptRequest(webView, request);
             }
 
             @Override
@@ -868,11 +1118,48 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                 }
                 String url = request.getUrl().toString();
                 Timber.d("shouldOverrideUrlLoading: %s", url);
+                if (url.startsWith("about:")) {
+                    return false;
+                }
                 if (url.startsWith("http")) {
                     if (MiniProgramRouter.INSTANCE.shouldOverrideUrlLoading(reference.get(), url, webView.getSettings().getUserAgentString())) {
                         return true;
                     }
+                    if (!ArticleListRuleEditActivity.hasBlockDom(lastDom) && !DomainConfigKt.isDisableAdBlock(lastDom)) {
+                        try {
+                            long id = AdUrlBlocker.instance().shouldBlock(lastDom, url);
+                            if (id >= 0) {
+                                return true;
+                            }
+                            if (adblockHolder != null) {
+                                AdblockHolder.AbpShouldBlockResult abpBlockResult = adblockHolder.shouldAbpBlockRequest(myUrl, request);
+                                if (AdblockHolder.AbpShouldBlockResult.BLOCK_LOAD.equals(abpBlockResult)) {
+                                    return true;
+                                }
+                            }
+                        } catch (Throwable e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    boolean pageCache = PreferenceMgr.getBoolean(webView.getContext(), "pageCache", false);
+                    if (pageCache && DomainConfigKt.isDisablePageCache(myUrl)) {
+                        pageCache = false;
+                    }
+                    pCache:
+                    if (pageCache && StringUtil.isNotEmpty(myUrl) && myUrl.startsWith("http") && request.hasGesture()) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            if (request.isRedirect()) {
+                                break pCache;
+                            }
+                        }
+                        //强制使用新窗口打开
+                        goPageFromPageCache(webView, url, request);
+                        return true;
+                    }
                     boolean forceNewWindow = PreferenceMgr.getBoolean(webView.getContext(), "forceNewWindow", false);
+                    if (forceNewWindow && DomainConfigKt.isDisableForceNewWindow(myUrl)) {
+                        forceNewWindow = false;
+                    }
                     forceNew:
                     if (forceNewWindow && StringUtil.isNotEmpty(myUrl) && myUrl.startsWith("http") && request.hasGesture()) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -893,15 +1180,31 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                         return true;
                     }
 //                    EventBus.getDefault().post(new OnOverrideUrlLoadingForHttp(url));
-                    if (Build.VERSION.SDK_INT < 26) {
-                        webView.loadUrl(url);
-                        return true;
-                    }
+//                    if (Build.VERSION.SDK_INT < 26) {
+//                        webView.loadUrl(url);
+//                        return true;
+//                    }
                     return false;
                 } else {
                     EventBus.getDefault().post(new OnOverrideUrlLoadingForOther(url));
                     return true;
                 }
+            }
+
+            private void goPageFromPageCache(WebView webView, String url, @Nullable WebResourceRequest request) {
+                HorizontalWebView webView1 = (HorizontalWebView) webView;
+                HorizontalWebView webView2 = MultiWindowManager.instance(reference.get()).addWebView(null, true, webView);
+                webView2.setParentWebView(webView1);
+                webView1.setForwardMock((w, u) -> goPageFromPageCache(w, u, null));
+                CookieManager.getInstance().setAcceptThirdPartyCookies(webView2, true);
+                Map<String, String> headers = request == null ? null : request.getRequestHeaders();
+                if (headers == null) {
+                    headers = new HashMap<>();
+                }
+                headers.put("Referer", myUrl);
+                webView2.loadUrl(url, headers);
+                EventBus.getDefault().post(new OnCreateWindowEvent(webView2));
+                MultiWindowManager.instance(reference.get()).checkTooManyParents(webView2);
             }
 
             @Override
@@ -910,12 +1213,15 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
                     return true;
                 }
                 Timber.d("shouldOverrideUrlLoading: %s", url);
+                if (url.startsWith("about:")) {
+                    return false;
+                }
                 if (url.startsWith("http")) {
                     EventBus.getDefault().post(new OnOverrideUrlLoadingForHttp(url));
-                    if (Build.VERSION.SDK_INT < 26) {
-                        webView.loadUrl(url);
-                        return true;
-                    }
+//                    if (Build.VERSION.SDK_INT < 26) {
+//                        webView.loadUrl(url);
+//                        return true;
+//                    }
                     return false;
                 } else {
                     EventBus.getDefault().post(new OnOverrideUrlLoadingForOther(url));
@@ -1041,6 +1347,11 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
         adblockHolder.stopAbpLoading();
     }
 
+    @Override
+    public void destroy() {
+        removeServiceWorkerClient(this);
+    }
+
     public boolean isAdBlockMarking() {
         return adBlockMarking;
     }
@@ -1049,9 +1360,129 @@ public class WebViewHelper implements HorizontalWebView.onLoadListener {
         this.adBlockMarking = adBlockMarking;
     }
 
+    @Nullable
+    @org.jetbrains.annotations.Nullable
+    @Override
+    public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+        if (horizontalWebView != null && horizontalWebView.isUsed() &&
+                reference.get() != null && !reference.get().isFinishing() && !reference.get().isOnPause()) {
+            return shouldInterceptRequest0(horizontalWebView, request);
+        }
+        return RESPONSE_IGNORE;
+    }
+
+    private WebResourceResponse shouldInterceptRequest0(WebView webView, WebResourceRequest request) {
+        try {
+            Timber.d("shouldInterceptRequest: request:%s", request.getUrl().toString());
+            if (!(webView instanceof HorizontalWebView)) {
+                return null;
+            }
+            HorizontalWebView view = (HorizontalWebView) webView;
+            if (!view.isUsed()) {
+                return null;
+            }
+            String url = request.getUrl().toString();
+            requestHeaderMap.put(url, request.getRequestHeaders());
+            if (ArticleListRuleEditActivity.hasBlockDom(lastDom) || DomainConfigKt.isDisableAdBlock(lastDom)) {
+                DetectorManager.getInstance().addTask(new VideoTask(request.getRequestHeaders(), request.getMethod(), url, url));
+                WebResourceResponse proxyResponse = BrowserProxy.INSTANCE.proxy(webView, myUrl, request);
+                if (proxyResponse != null) {
+                    return proxyResponse;
+                }
+                return WebViewCacheInterceptorInst.getInstance().interceptRequest(request);
+            }
+            long id = AdUrlBlocker.instance().shouldBlock(lastDom, url);
+            if (id >= 0) {
+                DetectedMediaResult mediaResult = new DetectedMediaResult(url);
+                mediaResult.setMediaType(new Media(Media.BLOCK, id + ""));
+                DetectorManager.getInstance().addMediaResult(mediaResult);
+                return new WebResourceResponse(null, null, null);
+            }
+            if (reference.get() == null || reference.get().isFinishing()) {
+                return null;
+            }
+
+            try {
+                AdblockHolder.AbpShouldBlockResult abpBlockResult = adblockHolder.shouldAbpBlockRequest(myUrl, request);
+                // if url should be blocked, we are not performing any further actions
+                if (AdblockHolder.AbpShouldBlockResult.BLOCK_LOAD.equals(abpBlockResult)) {
+                    if (reference.get() == null || reference.get().isFinishing()) {
+                        return null;
+                    }
+                    DetectedMediaResult mediaResult = new DetectedMediaResult(url);
+                    mediaResult.setMediaType(new Media(Media.BLOCK, "abp"));
+                    DetectorManager.getInstance().addMediaResult(mediaResult);
+                    return WebResponseResult.BLOCK_LOAD;
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            DetectorManager.getInstance().addTask(new VideoTask(request.getRequestHeaders(), request.getMethod(), request.getUrl().toString(), request.getUrl().toString()));
+            WebResourceResponse proxyResponse = BrowserProxy.INSTANCE.proxy(webView, myUrl, request);
+            if (proxyResponse != null) {
+                return proxyResponse;
+            }
+            return WebViewCacheInterceptorInst.getInstance().interceptRequest(request);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     private static class WebResponseResult {
         static final WebResourceResponse ALLOW_LOAD = null;
         static final WebResourceResponse BLOCK_LOAD =
                 new WebResourceResponse(RESPONSE_MIME_TYPE, RESPONSE_CHARSET_NAME, null);
+    }
+
+    private volatile static List<ServiceWorkerInterceptor> serviceWorkerInterceptors = null;
+
+    public static void addServiceWorkerClient(ServiceWorkerInterceptor interceptor) {
+        try {
+            if (serviceWorkerInterceptors == null) {
+                synchronized (WebViewHelper.class) {
+                    if (serviceWorkerInterceptors == null) {
+                        serviceWorkerInterceptors = new ArrayList<>();
+                        if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)) {
+                            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(new ServiceWorkerClientCompat() {
+                                @Nullable
+                                @Override
+                                public WebResourceResponse shouldInterceptRequest(@NotNull WebResourceRequest request) {
+                                    try {
+                                        if (serviceWorkerInterceptors != null) {
+                                            for (int i = serviceWorkerInterceptors.size() - 1; i >= 0; i--) {
+                                                WebResourceResponse response = serviceWorkerInterceptors.get(i).shouldInterceptRequest(request);
+                                                if (RESPONSE_IGNORE != response) {
+                                                    return response;
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                    }
+                                    return null;
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            if (!serviceWorkerInterceptors.contains(interceptor)) {
+                serviceWorkerInterceptors.add(interceptor);
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void removeServiceWorkerClient(ServiceWorkerInterceptor interceptor) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && serviceWorkerInterceptors != null) {
+                serviceWorkerInterceptors.remove(interceptor);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

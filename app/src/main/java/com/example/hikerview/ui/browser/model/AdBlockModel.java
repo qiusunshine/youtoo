@@ -4,17 +4,24 @@ import android.content.Context;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
+
 import com.example.hikerview.model.AdBlockRule;
 import com.example.hikerview.ui.Application;
+import com.example.hikerview.ui.browser.data.DomainConfigKt;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
+import com.example.hikerview.ui.home.ArticleListRuleEditActivity;
 import com.example.hikerview.ui.setting.model.SettingConfig;
 import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.PreferenceMgr;
 import com.example.hikerview.utils.StringUtil;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 
 import org.litepal.LitePal;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 作者：By 15968
@@ -24,6 +31,11 @@ import java.util.List;
 public class AdBlockModel {
     private static final String TAG = "AdBlockModel";
     private static String[] whiteDomainList = new String[]{"haikuoshijie.cn"};
+
+    private static Cache<String, String> ruleCache = CacheBuilder.newBuilder()
+            //30秒自动失效
+            .expireAfterAccess(30, TimeUnit.SECONDS)
+            .build();
 
     public static String saveBlockRule(String url, String rule) {
         if (TextUtils.isEmpty(url)) {
@@ -36,6 +48,7 @@ public class AdBlockModel {
         } catch (Exception e) {
             e.printStackTrace();
         }
+        ruleCache.invalidate(dom);
         String finalRule;
         if (CollectionUtil.isEmpty(blockRules)) {
             AdBlockRule adBlockRule = new AdBlockRule();
@@ -73,6 +86,7 @@ public class AdBlockModel {
                 }
             }
             listener.ok(rules.size());
+            ruleCache.cleanUp();
         });
     }
 
@@ -87,6 +101,7 @@ public class AdBlockModel {
         } catch (Exception e) {
             e.printStackTrace();
         }
+        ruleCache.invalidate(dom);
         if (CollectionUtil.isEmpty(blockRules)) {
             AdBlockRule adBlockRule = new AdBlockRule();
             adBlockRule.setDom(dom);
@@ -102,6 +117,14 @@ public class AdBlockModel {
         }
     }
 
+    public static void deleteRule(@Nullable AdBlockRule adBlockRule) {
+        if (adBlockRule == null) {
+            return;
+        }
+        adBlockRule.delete();
+        ruleCache.invalidate(adBlockRule.getDom());
+    }
+
     public static String getBlockRule(String url) {
         if (TextUtils.isEmpty(url)) {
             return null;
@@ -112,16 +135,31 @@ public class AdBlockModel {
                 return null;
             }
         }
-        List<AdBlockRule> blockRules = null;
+        if (ArticleListRuleEditActivity.hasBlockDom(dom)) {
+            return null;
+        }
+        String r = null;
         try {
-            blockRules = LitePal.where("dom = ?", dom).limit(1).find(AdBlockRule.class);
+            r = ruleCache.get(dom, () -> {
+                List<AdBlockRule> blockRules = null;
+                try {
+                    blockRules = LitePal.where("dom = ?", dom).limit(1).find(AdBlockRule.class);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                if (CollectionUtil.isEmpty(blockRules)) {
+                    return "";
+                }
+                return blockRules.get(0).getRule();
+            });
         } catch (Exception e) {
             e.printStackTrace();
         }
-        if (CollectionUtil.isEmpty(blockRules)) {
+        //优先用本地的，本地没有用远程的
+        if (StringUtil.isEmpty(r)) {
             return AdUrlBlocker.instance().getBlockRules(url);
         }
-        return blockRules.get(0).getRule();
+        return r;
     }
 
     public static String getBlockJs(String url) {
@@ -131,7 +169,7 @@ public class AdBlockModel {
         String rule = getBlockRule(url);
         Log.d(TAG, "getBlockJs: " + rule);
         boolean forceBlock = PreferenceMgr.getBoolean(Application.application, "forceBlock", false);
-        if (forceBlock) {
+        if (forceBlock && !DomainConfigKt.isDisableForceBlock(url)) {
             if (StringUtil.isNotEmpty(rule)) {
                 rule = rule + "@@" + getForceBlockJS();
             } else {
@@ -172,7 +210,7 @@ public class AdBlockModel {
         return null;
     }
 
-    private static String getBlockJsByRule(String rule) {
+    public static String getBlockJsByRule(String rule) {
         if (TextUtils.isEmpty(rule)) {
             return null;
         }

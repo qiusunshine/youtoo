@@ -4,6 +4,7 @@ import android.content.Context;
 import android.text.TextUtils;
 
 import com.annimon.stream.function.Consumer;
+import com.example.hikerview.ui.browser.data.DomainConfigKt;
 import com.example.hikerview.ui.browser.model.JSManager;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.utils.StringUtil;
@@ -53,6 +54,9 @@ public class JsPluginHelper {
             webView.accept(adBlockJs);
         }
         if(StringUtil.isEmpty(url)){
+            return;
+        }
+        if(DomainConfigKt.isDisableJsPlugin(url)){
             return;
         }
         if (!url.contains("/android_asset/")) {

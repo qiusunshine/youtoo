@@ -11,11 +11,9 @@ import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.BackgroundColorSpan;
-import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.ScrollView;
@@ -26,15 +24,16 @@ import com.example.hikerview.service.parser.HttpParser;
 import com.example.hikerview.service.parser.JSEngine;
 import com.example.hikerview.ui.base.BaseStatusActivity;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
-import com.example.hikerview.ui.js.editor.CodeTextView;
-import com.example.hikerview.ui.js.editor.CodeTextViewPane;
-import com.example.hikerview.ui.js.editor.PreformTextView;
-import com.example.hikerview.ui.view.ZoomCodeTextPaneView;
 import com.example.hikerview.utils.DebugUtil;
 import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.StringFindUtil;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.ToastMgr;
+import com.example.hikerview.utils.ViewTool;
+import com.hiker.editor.editor.jsc.CodeTextView;
+import com.hiker.editor.editor.jsc.CodeTextViewPane;
+import com.hiker.editor.editor.jsc.PreformTextView;
+import com.hiker.editor.editor.jsc.ZoomCodeTextPaneView;
 
 import org.apache.commons.lang3.StringUtils;
 import org.jsoup.Jsoup;
@@ -49,7 +48,7 @@ import static android.view.View.VISIBLE;
 /**
  * 作者：By 15968
  * 日期：On 2019/10/9
- *
+ * <p>
  * 时间：At 20:22
  */
 public class HtmlSourceActivity extends BaseStatusActivity {
@@ -210,26 +209,10 @@ public class HtmlSourceActivity extends BaseStatusActivity {
         String file = getIntent().getStringExtra("url");
         domEditView.setHint("网址");
 
-        domEditView.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEARCH
-                    || actionId == EditorInfo.IME_ACTION_GO
-                    || actionId == EditorInfo.IME_ACTION_SEND
-                    || actionId == EditorInfo.IME_ACTION_DONE
-                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                if (!isLoading) {
-                    loadUrl(domEditView.getText().toString(), false);
-                }
-                return true;
+        ViewTool.setOnEnterClickListener(domEditView, s -> {
+            if (!isLoading) {
+                loadUrl(s, false);
             }
-            return false;
-        });
-        domEditView.setOnKeyListener((v, keyCode, event) -> {
-            if (keyCode == KeyEvent.KEYCODE_ENTER) {
-                if (!isLoading) {
-                    loadUrl(domEditView.getText().toString(), false);
-                }
-            }
-            return false;
         });
         loadUrl(file);
     }
@@ -265,7 +248,7 @@ public class HtmlSourceActivity extends BaseStatusActivity {
         HttpParser.parseSearchUrlForHtml(url, new HttpParser.OnSearchCallBack() {
             @Override
             public void onSuccess(String url, String s) {
-                if(isFinishing()){
+                if (isFinishing()) {
                     return;
                 }
                 try {
@@ -310,7 +293,7 @@ public class HtmlSourceActivity extends BaseStatusActivity {
         if (code == null || code.length() <= 0) {
             return false;
         }
-        String[] tags = new String[]{"if ", "function ", "var ", "let ", "for ", ".push", "const ", "fetch(", "setResult("};
+        String[] tags = new String[]{"if ", "function ", "var ", "let ", "for ", ".push", "const ", "fetch(", "setResult(", "return "};
         int count = 0;
         for (String tag : tags) {
             if (code.contains(tag)) {

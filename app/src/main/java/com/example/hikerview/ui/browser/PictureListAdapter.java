@@ -1,5 +1,6 @@
 package com.example.hikerview.ui.browser;
 
+import android.app.Activity;
 import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -9,8 +10,11 @@ import android.widget.ImageView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.bumptech.glide.request.RequestOptions;
 import com.example.hikerview.R;
+import com.example.hikerview.ui.base.IBaseHolder;
 import com.example.hikerview.utils.GlideUtil;
 
 import java.util.List;
@@ -24,17 +28,24 @@ import java.util.List;
 class PictureListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private static final String TAG = "PictureListAdapter";
     private Context context;
+
+    public List<String> getList() {
+        return list;
+    }
+
     private List<String> list;
     private OnItemClickListener onItemClickListener;
     private RequestOptions options;
     private String url;
+    private boolean horizontal;
 
-    PictureListAdapter(Context context, List<String> list, String url) {
+    PictureListAdapter(Context context, List<String> list, String url, boolean horizontal) {
         this.context = context;
         this.list = list;
         this.url = url;
         options = new RequestOptions();
-        options.placeholder(context.getResources().getDrawable(R.mipmap.placeholder));
+        this.horizontal = horizontal;
+        options.placeholder(context.getResources().getDrawable(R.mipmap.placeholder)).diskCacheStrategy(DiskCacheStrategy.DATA);
     }
 
     interface OnItemClickListener {
@@ -49,9 +60,27 @@ class PictureListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-        return new Holder(LayoutInflater.from(context).inflate(R.layout.item_pic, parent, false));
+        return new Holder(LayoutInflater.from(context).inflate(
+                horizontal ? R.layout.item_pic_horizontal : R.layout.item_pic, parent, false));
     }
 
+    @Override
+    public void onViewRecycled(@NonNull RecyclerView.ViewHolder holder) {
+        super.onViewRecycled(holder);
+        if (holder instanceof IBaseHolder) {
+            IBaseHolder baseHolder = (IBaseHolder) holder;
+            if (baseHolder.getImageView() != null && context != null) {
+                if (context instanceof Activity && ((Activity) context).isFinishing()) {
+                    return;
+                }
+                try {
+                    Glide.with(context).clear(baseHolder.getImageView());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
 
     @Override
     public void onBindViewHolder(@NonNull final RecyclerView.ViewHolder viewHolder, int position) {
@@ -81,12 +110,17 @@ class PictureListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return list.size();
     }
 
-    private class Holder extends RecyclerView.ViewHolder {
+    private class Holder extends RecyclerView.ViewHolder implements IBaseHolder {
         ImageView imgView;
 
         Holder(View itemView) {
             super(itemView);
             imgView = itemView.findViewById(R.id.item_reult_img);
+        }
+
+        @Override
+        public ImageView getImageView() {
+            return imgView;
         }
     }
 }

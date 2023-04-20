@@ -53,15 +53,15 @@ public class ArticleListService extends BaseModel<ArticleList> {
                 }
             }
         }
-        parse(page, newLoad, articleListRule, baseCallback);
+        parse(actionType, page, articleListRule, baseCallback);
     }
 
-    private void parse(int page, boolean newLoad, ArticleListRule articleListRule, final BaseCallback<ArticleList> baseCallback) {
+    private void parse(String actionType, int page, ArticleListRule articleListRule, final BaseCallback<ArticleList> baseCallback) {
         String urlWithUa = HttpParser.getUrlAppendUA(articleListRule.getUrl(), articleListRule.getUa());
         try {
             String url = CommonParser.parsePageClassUrl(urlWithUa, page, articleListRule);
+            url = JSEngine.proxyUrl(url, articleListRule.getProxy());
             final String rule = articleListRule.getFind_rule();
-            final boolean finalNewLoad = newLoad;
             final ArticleListRule finalArticleListRule = articleListRule;
             HttpParser.parseSearchUrlForHtml(url, new HttpParser.OnSearchCallBack() {
                 @Override
@@ -70,7 +70,7 @@ public class ArticleListService extends BaseModel<ArticleList> {
                         urlParseCallBack.storeUrl(url == null ? "" : url);
                     }
                     try {
-                        HomeParser.findList(url, finalArticleListRule, rule, s, page, finalNewLoad, baseCallback);
+                        HomeParser.findList(actionType, url, finalArticleListRule, rule, s, page, baseCallback);
                     } catch (Exception e) {
                         baseCallback.error("", TAG + "-解析失败：" + e.toString(), "", e);
                     }

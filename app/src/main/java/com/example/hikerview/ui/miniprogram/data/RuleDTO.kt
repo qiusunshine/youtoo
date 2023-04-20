@@ -20,10 +20,11 @@ data class RuleDTO(
     var params: String?,
     var col_type: String?,
     var nextRule: String?,
-    var nextColType: String?
+    var nextColType: String?,
+    var preRule: String?
 ) {
     @JSONCreator
-    constructor() : this(null, null, null, null, null, null, null, null, null, null) {
+    constructor() : this(null, null, null, null, null, null, null, null, null, null, null) {
 
     }
 

@@ -26,6 +26,28 @@ public class HomeConfigUtil {
      */
     public static void deleteApks(Context context) {
         try {
+            //先删除遗留文件
+            File dir20 = new File(UriUtils.getRootDir(context) + File.separator + "magnet");
+            if (dir20.isDirectory() && dir20.exists()) {
+                File[] files = dir20.listFiles();
+                if (files != null && files.length > 0) {
+                    for (File file : files) {
+                        FileUtil.deleteDirs(file.getAbsolutePath());
+                    }
+                }
+            }
+            String dir0 = UriUtils.getRootDir(context) + File.separator + "cache";
+            File dir2 = new File(dir0);
+            if (dir2.isDirectory() && dir2.exists()) {
+                File[] files = dir2.listFiles();
+                if (files != null && files.length > 0) {
+                    for (File file : files) {
+                        if (file.getName().startsWith("_fileSelect_")) {
+                            file.delete();
+                        }
+                    }
+                }
+            }
             boolean apkClean = PreferenceMgr.getBoolean(context, "download", "apkClean", false);
             if (!apkClean) {
                 return;
@@ -39,7 +61,7 @@ public class HomeConfigUtil {
                 File[] files = dir.listFiles();
                 if (files != null && files.length > 0) {
                     for (File file : files) {
-                        if(file.isDirectory() || !file.getName().endsWith(".apk")){
+                        if (file.isDirectory() || !file.getName().endsWith(".apk")) {
                             continue;
                         }
                         try {

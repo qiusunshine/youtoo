@@ -10,11 +10,13 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 
 import com.example.hikerview.R;
+import com.example.hikerview.constants.UAEnum;
 import com.example.hikerview.listener.UpdateUaListener;
 import com.example.hikerview.model.UaRuleDO;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.ToastMgr;
+import com.example.hikerview.utils.view.DialogUtil;
 
 import org.litepal.LitePal;
 
@@ -31,8 +33,8 @@ public class UAModel {
 
     public enum WebUA {
         Android("Android", null),
-        PC("PC桌面", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.87 Safari/537.36"),
-        IPhone("IPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 9_3 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13E230 Safari/601.1"),
+        PC("PC桌面", UAEnum.PC.getContent()),
+        IPhone("IPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"),
         CustomGlobal("自定义全局", null),
         Custom("自定义该网站", null);
 
@@ -162,7 +164,7 @@ public class UAModel {
         titleE.setText(dom);
         urlE.setHint("请输入UA规则");
         urlE.setText(useUa == null ? "" : useUa);
-        new AlertDialog.Builder(context)
+        AlertDialog alertDialog = new AlertDialog.Builder(context)
                 .setTitle("自定义网站UA")
                 .setView(view1)
                 .setCancelable(true)
@@ -184,6 +186,8 @@ public class UAModel {
                             listener.saved(ua);
                         }
                     }
-                }).setNegativeButton("取消", (dialog2, which3) -> dialog2.dismiss()).show();
+                }).setNegativeButton("取消", (dialog2, which3) -> dialog2.dismiss())
+                .create();
+        DialogUtil.INSTANCE.showAsCard(context, alertDialog);
     }
 }

@@ -2,16 +2,25 @@ package com.example.hikerview.ui.miniprogram
 
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.app.Activity.RESULT_OK
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Looper
 import android.text.TextUtils
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.webkit.ValueCallback
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.RelativeLayout
+import android.widget.TextView
 import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
@@ -20,6 +29,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.alibaba.fastjson.JSON
 import com.annimon.stream.Stream
 import com.annimon.stream.function.Consumer
+import com.bumptech.glide.Glide
 import com.example.hikerview.R
 import com.example.hikerview.constants.ArticleColTypeEnum
 import com.example.hikerview.event.OnBackEvent
@@ -27,14 +37,24 @@ import com.example.hikerview.event.home.LastClickShowEvent
 import com.example.hikerview.event.home.OnRefreshPageEvent
 import com.example.hikerview.event.home.OnRefreshWebViewEvent
 import com.example.hikerview.event.home.OnRefreshX5HeightEvent
+import com.example.hikerview.event.home.ShowFileChooserEvent
+import com.example.hikerview.event.rule.CacheCode
 import com.example.hikerview.event.rule.ClsItemsFindEvent
 import com.example.hikerview.event.rule.ConfirmEvent
 import com.example.hikerview.event.rule.ItemFindEvent
 import com.example.hikerview.event.rule.ItemModifyEvent
 import com.example.hikerview.event.web.DestroyEvent
-import com.example.hikerview.service.parser.*
+import com.example.hikerview.service.parser.BaseParseCallback
+import com.example.hikerview.service.parser.HttpParser
+import com.example.hikerview.service.parser.JSEngine
+import com.example.hikerview.service.parser.LazyRuleParser
+import com.example.hikerview.service.parser.PageParser
+import com.example.hikerview.service.parser.WebkitParser
+import com.example.hikerview.service.parser.X5WebViewParser
+import com.example.hikerview.ui.Application
 import com.example.hikerview.ui.base.BaseCallback
 import com.example.hikerview.ui.base.BaseFragment
+import com.example.hikerview.ui.browser.PictureListActivity
 import com.example.hikerview.ui.browser.model.JSManager
 import com.example.hikerview.ui.browser.model.UrlDetector
 import com.example.hikerview.ui.browser.util.CollectionUtil
@@ -45,18 +65,29 @@ import com.example.hikerview.ui.home.model.ArticleList
 import com.example.hikerview.ui.home.model.ArticleListRule
 import com.example.hikerview.ui.home.model.RouteBlocker
 import com.example.hikerview.ui.home.model.TextConfig
-import com.example.hikerview.ui.home.model.article.extra.LongTextExtra
+import com.example.hikerview.ui.home.model.article.extra.InputExtra
 import com.example.hikerview.ui.home.model.article.extra.RichTextExtra
 import com.example.hikerview.ui.home.model.article.extra.X5Extra
+import com.example.hikerview.ui.home.reader.ReadAloudHolder
+import com.example.hikerview.ui.home.reader.ReadPageData
 import com.example.hikerview.ui.home.view.ClickArea
 import com.example.hikerview.ui.home.webview.ArticleWebViewHolder
 import com.example.hikerview.ui.miniprogram.data.AutoPageData
 import com.example.hikerview.ui.miniprogram.data.HistoryDTO
 import com.example.hikerview.ui.miniprogram.data.RuleDTO
-import com.example.hikerview.ui.miniprogram.extensions.*
+import com.example.hikerview.ui.miniprogram.extensions.isFTPOrEd2k
+import com.example.hikerview.ui.miniprogram.extensions.isImage
+import com.example.hikerview.ui.miniprogram.extensions.isMagnet
+import com.example.hikerview.ui.miniprogram.extensions.isVideoMusic
 import com.example.hikerview.ui.miniprogram.interfaces.ArticleListIsland
 import com.example.hikerview.ui.miniprogram.service.ArticleListService
 import com.example.hikerview.ui.miniprogram.service.HistoryMemoryService
+import com.example.hikerview.ui.miniprogram.service.getCache
+import com.example.hikerview.ui.miniprogram.service.hasCache
+import com.example.hikerview.ui.miniprogram.service.initAutoCacheMd5
+import com.example.hikerview.ui.miniprogram.service.isCacheOnly
+import com.example.hikerview.ui.miniprogram.service.saveCache
+import com.example.hikerview.ui.rules.HighLightEditActivity
 import com.example.hikerview.ui.setting.file.FileDetailAdapter
 import com.example.hikerview.ui.setting.file.FileDetailPopup
 import com.example.hikerview.ui.setting.model.SettingConfig
@@ -64,23 +95,37 @@ import com.example.hikerview.ui.setting.text.TextConfigHelper
 import com.example.hikerview.ui.thunder.ThunderManager
 import com.example.hikerview.ui.video.PlayerChooser
 import com.example.hikerview.ui.video.VideoChapter
+import com.example.hikerview.ui.view.CustomCenterRecyclerViewPopup
 import com.example.hikerview.ui.view.PopImageLoader
 import com.example.hikerview.ui.view.PopImageLoaderNoView
 import com.example.hikerview.ui.view.SmartRefreshLayout
+import com.example.hikerview.ui.view.popup.MyImageViewerPopupView
 import com.example.hikerview.ui.view.popup.MyXpopup
-import com.example.hikerview.utils.*
+import com.example.hikerview.ui.view.popup.XPopupImageLoader
+import com.example.hikerview.utils.ClipboardUtil
+import com.example.hikerview.utils.DataTransferUtils
+import com.example.hikerview.utils.DebugUtil
+import com.example.hikerview.utils.DisplayUtil
+import com.example.hikerview.utils.FileUtil
+import com.example.hikerview.utils.HeavyTaskUtil
+import com.example.hikerview.utils.PreferenceMgr
+import com.example.hikerview.utils.ShareUtil
+import com.example.hikerview.utils.StringUtil
+import com.example.hikerview.utils.StringUtil.SCHEME_FILE_SELECT
+import com.example.hikerview.utils.ThreadTool
+import com.example.hikerview.utils.ThreadTool.cancelTasks
 import com.example.hikerview.utils.ThreadTool.runOnUI
+import com.example.hikerview.utils.ToastMgr
+import com.example.hikerview.utils.UriUtils
+import com.example.hikerview.utils.WebUtil
 import com.google.android.material.snackbar.Snackbar
 import com.lxj.xpopup.XPopup
-import com.lxj.xpopup.core.ImageViewerPopupView
-import com.lxj.xpopup.interfaces.XPopupImageLoader
 import com.lxj.xpopup.util.KeyboardUtils
 import com.org.lqtk.fastscroller.RecyclerFastScroller
 import com.org.lqtk.fastscroller.RecyclerFastScroller.onHandlePressedListener
 import com.scwang.smartrefresh.layout.constant.RefreshState
 import com.tencent.smtt.sdk.QbSdk
 import com.tencent.smtt.sdk.WebView
-import kotlinx.android.synthetic.main.view_debug_popup.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.jingbin.progress.WebProgress
@@ -89,11 +134,19 @@ import org.apache.commons.lang3.StringUtils
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
-import java.util.*
+import org.jsoup.Jsoup
+import timber.log.Timber
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Arrays
+import java.util.Date
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.collections.ArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 
 
 /**
@@ -106,6 +159,10 @@ class MiniProgramFragment(
     private val pageTitle: String
 ) : BaseFragment(), BaseCallback<ArticleList> {
 
+    constructor() : this(RuleDTO(), "") {
+
+    }
+
     init {
         lazy = false
     }
@@ -116,10 +173,14 @@ class MiniProgramFragment(
     private var fastScroller: RecyclerFastScroller? = null
     private val list = ArrayList<ArticleList>()
     private val articleListRule = ArticleListRule()
-    private var page = 1
+    private var atomicPage = AtomicInteger(1)
+    private var page: Int
+        get() = atomicPage.get()
+        set(value) = atomicPage.set(value)
     private val articleListService = ArticleListService()
     private var myUrl: String = ""
     private var webViewHolder: ArticleWebViewHolder? = null
+    private var filePathCallback: ValueCallback<Array<Uri?>>? = null
     private var webViewContainer: RelativeLayout? = null
     private var progress_bar: WebProgress? = null
     private var bgViewHeight = 0
@@ -144,6 +205,63 @@ class MiniProgramFragment(
     private var noRecordHistory = false
     private var lastVisibleItem = 0
     private var cannotRefresh = false
+    private var highlightCallback: Consumer<String>? = null
+    private var read_chapter: TextView? = null
+    private var read_time: TextView? = null
+    private var read_power: TextView? = null
+    private var read_bottom_bg: View? = null
+    private val readMap: MutableMap<Int, ReadPageData> = HashMap<Int, ReadPageData>()
+    private var scrollPos = -1
+    private var fileSelectJs: String? = null
+    private var fileSelectPosition: Int = 0
+    private var isLoading = false
+    private var loadingPage = -1
+    private var maxLoadedPage = 0
+    private var memoryTask: MemoryPageTask? = null
+    var scrollListener: RecyclerView.OnScrollListener? = null
+    private var scrollFlag = -2 //-2不启用，-1启用，0，已经滑动过
+
+    /**
+     * 自动缓存页面
+     */
+    private var autoCacheMd5: String? = null
+    private var cacheOnly = false
+
+    /**
+     * 缓存合并状态，0：不需要合并，1：等待合并，2：已合并过
+     */
+    private var cacheMergeState = 0
+
+    /**
+     * 缓存的代码
+     */
+    private var cacheCode: String? = null
+    private var playLastConsumed = false
+
+    /**
+     * 自动阅读、语音朗读
+     */
+    private var autoRead = false
+
+    /**
+     * 自动阅读、语音朗读
+     */
+    private var readAloud = false
+    private var readAloudHolder: ReadAloudHolder? = null
+    private var readPosition = -1
+    private var lastSelectedPosition = -1
+
+    fun initAutoCache(pageTitle: String?, pageUrl: String?) {
+        autoCacheMd5 = initAutoCacheMd5(pageTitle, pageUrl)
+        if (!autoCacheMd5.isNullOrEmpty()) {
+            cacheOnly = isCacheOnly(pageUrl)
+        }
+    }
+
+    fun updateParams(params: String?) {
+        articleListRule?.params = params
+    }
+
 
     override fun initLayout(): Int {
         return R.layout.fragment_mini_program
@@ -165,6 +283,7 @@ class MiniProgramFragment(
         articleListRule.pages = ruleDTO.pages
         articleListRule.params = ruleDTO.params
         articleListRule.col_type = ruleDTO.col_type
+        articleListRule.preRule = ruleDTO.preRule
 
         if (StringUtil.isEmpty(articleListRule.url)) {
             noHistory = true
@@ -207,25 +326,13 @@ class MiniProgramFragment(
 
             override fun onClick(view: View?, position: Int) {
                 if (ArticleColTypeEnum.RICH_TEXT == ArticleColTypeEnum.getByCode(adapter.list[position].type)) {
-                    if (StringUtil.isNotEmpty(adapter.list[position].extra)) {
-                        val extra = JSON.parseObject(
-                            adapter.list[position].extra,
-                            RichTextExtra::class.java
-                        )
-                        if (extra.isClick) {
-                            scrollPageByTouch()
-                        }
+                    if (isReadTheme) {
+                        scrollPageByTouch()
                     }
                     return
                 } else if (ArticleColTypeEnum.LONG_TEXT == ArticleColTypeEnum.getByCode(adapter.list[position].type)) {
-                    if (StringUtil.isNotEmpty(adapter.list[position].extra)) {
-                        val extra = JSON.parseObject(
-                            adapter.list[position].extra,
-                            LongTextExtra::class.java
-                        )
-                        if (extra.isClick) {
-                            scrollPageByTouch()
-                        }
+                    if (isReadTheme) {
+                        scrollPageByTouch()
                     }
                     return
                 }
@@ -245,31 +352,89 @@ class MiniProgramFragment(
             }
 
             override fun onLongClick(view: View?, position: Int) {
+                val baseExtra = adapter.list[position].baseExtra
+                val ops = if (baseExtra != null && !baseExtra.longClick.isNullOrEmpty()) {
+                    val arr = baseExtra.longClick.map { it.title }.toMutableList()
+                    arr.add("外部打开")
+                    arr.add("复制链接")
+                    arr.add("调试数据")
+                    arr.toTypedArray()
+                } else {
+                    arrayOf("外部打开", "复制链接", "调试数据")
+                }
                 XPopup.Builder(context)
-                    .asCenterList(
-                        "选择操作",
-                        arrayOf("外部打开", "复制链接", "调试数据")
-                    ) { _, text ->
-                        val url = adapter.list[position].url
-                        val urlRule = (url ?: "").split("@rule=")
-                        val lazyRule = urlRule[0].split("@lazyRule=")
-                        when (text) {
-                            "外部打开" -> {
-                                ShareUtil.findChooserToDeal(
-                                    context,
-                                    HttpParser.getFirstPageUrl(lazyRule[0])
-                                )
-                            }
-                            "复制链接" -> {
-                                ClipboardUtil.copyToClipboard(
-                                    context,
-                                    HttpParser.getFirstPageUrl(lazyRule[0])
-                                )
-                            }
-                            "调试数据" -> showPosDetail(position)
-                        }
-                    }
-                    .show()
+                    .asCustom(
+                        CustomCenterRecyclerViewPopup(requireContext())
+                            .withTitle("请选择操作")
+                            .with(
+                                ops,
+                                if (ops.size >= 4) 2 else 1,
+                                object : CustomCenterRecyclerViewPopup.ClickListener {
+                                    override fun click(text: String?, option: Int) {
+                                        val url = adapter.list[position].url
+                                        val urlRule = (url ?: "").split("@rule=")
+                                        val lazyRule = urlRule[0].split("@lazyRule=")
+                                        when (text) {
+                                            "外部打开" -> {
+                                                ShareUtil.findChooserToDeal(
+                                                    context,
+                                                    HttpParser.getFirstPageUrl(lazyRule[0])
+                                                )
+                                            }
+                                            "复制链接" -> {
+                                                ClipboardUtil.copyToClipboard(
+                                                    context,
+                                                    HttpParser.getFirstPageUrl(lazyRule[0])
+                                                )
+                                            }
+                                            "调试数据" -> showPosDetail(position)
+                                            else -> {
+                                                //自定义的长按操作
+                                                for (clickExtra in baseExtra.longClick) {
+                                                    if (text == clickExtra.title) {
+                                                        val input = clickExtra.title
+                                                        val js = clickExtra.js
+                                                        HeavyTaskUtil.executeNewTask {
+                                                            val result: String =
+                                                                JSEngine.getInstance().evalJS(
+                                                                    JSEngine.getMyRule(
+                                                                        articleListRule
+                                                                    )
+                                                                            + JSEngine.getInstance()
+                                                                        .generateMY(
+                                                                            "MY_URL",
+                                                                            Utils.escapeJavaScriptString(
+                                                                                myUrl
+                                                                            )
+                                                                        ) + js, input
+                                                                )
+                                                            if (StringUtil.isNotEmpty(result) && !"undefined".equals(
+                                                                    result,
+                                                                    ignoreCase = true
+                                                                )
+                                                                && activity != null && !requireActivity().isFinishing
+                                                            ) {
+                                                                requireActivity().runOnUiThread {
+                                                                    dealUrlPos(
+                                                                        view,
+                                                                        position,
+                                                                        result
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    override fun onLongClick(url: String?, position: Int) {
+
+                                    }
+                                })
+                    ).show()
             }
 
         }
@@ -290,7 +455,7 @@ class MiniProgramFragment(
         fastScroller!!.attachRecyclerView(recyclerView)
         fastScroller!!.touchTargetWidth = 10
         fastScroller!!.setMarginLeft(10)
-        fastScroller!!.setMinItemCount(200)
+        fastScroller!!.setMinItemCount(if (isReadTheme) 2000000 else 200)
         fastScroller!!.barColor = requireContext().resources.getColor(R.color.transparent)
         fastScroller!!.setDrawable(
             requireContext().resources.getDrawable(R.drawable.fastscroll_handle),
@@ -318,8 +483,10 @@ class MiniProgramFragment(
                 page = 1
                 if (StringUtil.isNotEmpty(onRefreshJS)) {
                     HeavyTaskUtil.executeNewTask {
+                        val js = onRefreshJS
+                        onRefreshJS = null
                         JSEngine.getInstance()
-                            .evalJS(JSEngine.getMyRule(articleListRule) + onRefreshJS, "")
+                            .evalJS(JSEngine.getMyRule(articleListRule) + hookBackJs() + js, "")
                         if (activity != null && !requireActivity().isFinishing) {
                             requireActivity().runOnUiThread {
                                 loadData()
@@ -340,17 +507,24 @@ class MiniProgramFragment(
         }
         progress_bar = findView(R.id.progress_bar)
         progress_bar?.setColor(resources.getColor(R.color.progress_blue))
-        if (!noHistory) {
+        if (!noRecordHistory) {
             //记忆页面
-            HistoryMemoryService.memoryPage(ruleDTO, pageTitle)
+            HistoryMemoryService.memoryPage(
+                ruleDTO,
+                pageTitle,
+                requireActivity().intent.getStringExtra("picUrl")
+            )
         }
 
         recyclerView.setOnScrollListener(
             object : RecyclerView.OnScrollListener() {
                 override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                     super.onScrollStateChanged(recyclerView, newState)
-                    if (newState == RecyclerView.SCROLL_STATE_IDLE && lastVisibleItem + 1 == adapter.getItemCount()
-                        || lastVisibleItem == -1 && adapter.itemCount <= 10
+                    if ((newState == RecyclerView.SCROLL_STATE_IDLE && lastVisibleItem + 1 == adapter.itemCount)
+                        || newState == RecyclerView.SCROLL_STATE_IDLE && lastVisibleItem + 2 == adapter.itemCount && webViewHolder != null && StringUtil.isNotEmpty(
+                            webViewHolder!!.extra
+                        ) && webViewHolder!!.extra.contains("float")
+                        || (lastVisibleItem == -1 && adapter.itemCount <= 10)
                     ) {
                         if (smartRefreshLayout.state != RefreshState.None) {
                             //触发的刷新，因为界面元素过少lastVisibleItem + 1 == adapter.getItemCount()为true
@@ -358,7 +532,7 @@ class MiniProgramFragment(
                         }
                         if (!articleListRule.url.contains("fypage")) {
                             if (articleListRule.url.contains("#autoPage#")) {
-                                autoPage()
+                                autoPage(true)
                             }
                             return
                         }
@@ -368,25 +542,238 @@ class MiniProgramFragment(
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     super.onScrolled(recyclerView, dx, dy)
                     lastVisibleItem = gridLayoutManager!!.findLastVisibleItemPosition()
-//                    val position =
-//                        if (gridLayoutManager == null) 0 else gridLayoutManager!!.findLastVisibleItemPosition()
-//                    if (scrollPos != position && position >= 0) {
-//                        scrollPos = position
-//                        val pageNow: Int = indicatorMap.get(position)
-//                        if (pageNow != null && pageNow > 0) {
-//                            updateReadChapter(pageNow - 1)
-//                        }
-//                    }
+                    val position = lastVisibleItem
+                    if (scrollPos != position && position >= 0) {
+                        scrollPos = position
+                        val pageData = readMap[position]
+                        if (pageData != null) {
+                            val pageNow = pageData.pageNow
+                            if (pageNow > 0) {
+                                updateReadChapter(pageNow - 1)
+                            }
+                            val idx = max(position - pageData.preSize, 0)
+                            val lastLoadedPage = maxLoadedPage
+                            if (isReadTheme && loadingPage < 0 && idx >= floor((pageData.size + 0.0) / 2) && lastLoadedPage < pageData.pageNow + 1) {
+                                Timber.d("will preload: lastLoadedPage: " + lastLoadedPage + ", pageNow: " + pageData.pageNow)
+                                preloadNow(maxLoadedPage)
+                            }
+                            val firstPos = gridLayoutManager?.findFirstVisibleItemPosition() ?: 0
+                            var pageIndex = firstPos - pageData.preSize
+                            if (pageIndex < 0) {
+                                pageIndex = 0
+                            }
+                            memoryPageIndex(pageData.chapterPos, pageData.chapterText, pageIndex)
+                        }
+                    }
                 }
             })
+
+        if (scrollListener != null) {
+            recyclerView.addOnScrollListener(scrollListener!!)
+            fastScroller?.setScrollListener { scrollOffset ->
+                if (scrollFlag == -1) {
+                    scrollFlag = 0
+                    //这个scrollOffset不靠谱，再次校验一下
+                    if (!isAtTop()) {
+                        scrollListener!!.onScrolled(recyclerView, 0, scrollOffset)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun preloadCheckForReadAloud() {
+        //不用findLastVisibleItemPosition是因为熄屏状态下不准，它不会更新
+        val position = readPosition
+        Timber.d(
+            "readAloudNext: Position: %s, scrollPos: %s, maxLoadedPage: %s",
+            position,
+            scrollPos,
+            maxLoadedPage
+        )
+        if (scrollPos != position && position >= 0) {
+            scrollPos = position
+            val pageData = readMap[position]
+            if (pageData != null) {
+                val pageNow = pageData.pageNow
+                if (pageNow > 0) {
+                    updateReadChapter(pageNow - 1)
+                }
+                val idx = max(position - pageData.preSize, 0)
+                val lastLoadedPage = maxLoadedPage
+                if (isReadTheme && loadingPage < 0 && idx >= floor((pageData.size + 0.0) / 2) && lastLoadedPage < pageData.pageNow + 1) {
+                    Timber.d("readAloudNext will preload: lastLoadedPage: " + lastLoadedPage + ", pageNow: " + pageData.pageNow)
+                    preloadNow(maxLoadedPage)
+                }
+                val firstPos = readPosition
+                var pageIndex = firstPos - pageData.preSize
+                if (pageIndex < 0) {
+                    pageIndex = 0
+                }
+                memoryPageIndex(pageData.chapterPos, pageData.chapterText, pageIndex)
+            }
+        }
+    }
+
+    fun isAtTop(): Boolean {
+        if (gridLayoutManager == null) {
+            return true
+        }
+        try {
+            val firstVisibleItemPosition = gridLayoutManager!!.findFirstVisibleItemPosition()
+            val lastVisibleItemPosition =
+                gridLayoutManager!!.findLastCompletelyVisibleItemPosition()
+            if (lastVisibleItemPosition >= adapter.list.size - 1 && gridLayoutManager!!.findFirstCompletelyVisibleItemPosition() == 0) {
+                //最后一个可见view是最后一个元素
+                return true
+            }
+            val dp15 = DisplayUtil.dpToPx(context, 15)
+            if (firstVisibleItemPosition == 0 && recyclerView.childCount > 0 && recyclerView.getChildAt(
+                    0
+                ).y == 0f
+            ) {
+                return true
+            } else if (firstVisibleItemPosition == 1 && recyclerView.getChildAt(0).visibility != View.VISIBLE && recyclerView.getChildAt(
+                    1
+                ).y == 0f
+            ) {
+                //可能前面塞了一个隐藏view
+                return true
+            } else if (firstVisibleItemPosition == 1 && recyclerView.getChildAt(0).visibility == View.VISIBLE) {
+                //前面塞了一个webview
+                if (recyclerView.adapter != null && recyclerView.adapter!!.getItemViewType(0) == ArticleColTypeEnum.X5_WEB_VIEW.itemType && recyclerView.getChildAt(
+                        0
+                    ).height == 0 && recyclerView.getChildAt(1).y <= dp15
+                ) {
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return false
+    }
+
+    private fun preloadNow(maxLoadedPage: Int) {
+        if (isLoading) {
+            return
+        }
+        if (!articleListRule.url.contains("fypage")) {
+            if (articleListRule.url.contains("#autoPage#")) {
+                autoPage(false)
+            }
+            return
+        }
+        page++
+        loadData()
+    }
+
+    private fun getPageIndex(): Int {
+        try {
+            val title = requireActivity().intent.getStringExtra("parentTitle")
+            val cUrl = requireActivity().intent.getStringExtra("parentUrl")
+
+            val history = HistoryMemoryService.getHistory(title, cUrl)
+            if (history != null) {
+                val extraData = history.getExtraJson()
+                if (extraData.pageIndex < adapter.list.size) {
+                    return extraData.pageIndex
+                }
+            }
+        } catch (e: java.lang.Exception) {
+            e.printStackTrace()
+        }
+        return 0
+    }
+
+    private fun memoryPageIndex(position: Int, clickText: String?, pageIndex: Int) {
+        if (!isReadTheme) {
+            return
+        }
+        memoryTask = MemoryPageTask(
+            requireActivity().intent.getStringExtra("parentTitle"),
+            requireActivity().intent.getStringExtra("parentUrl"),
+            position, clickText, pageIndex
+        )
+    }
+
+    private class MemoryPageTask(
+        val parentTitle: String?,
+        val parentUrl: String?,
+        val position: Int,
+        val clickText: String?,
+        val pageIndex: Int
+    ) : Runnable {
+        override fun run() {
+            if (!parentTitle.isNullOrEmpty() && !clickText.isNullOrEmpty()) {
+                HistoryMemoryService.memoryClick(
+                    parentUrl,
+                    parentTitle,
+                    position,
+                    clickText,
+                    pageIndex
+                )
+            }
+        }
     }
 
     override fun initData() {
-        smartRefreshLayout.autoRefresh()
         articleListService.withUrlParseCallBack {
             myUrl = it
         }
+        val useCache = !autoCacheMd5.isNullOrEmpty()
+        if (useCache) {
+            HeavyTaskUtil.executeNewTask {
+                val pageCache = getCache(requireContext(), autoCacheMd5)
+                //执行代码获取
+                if (StringUtil.isNotEmpty(pageCache.code)) {
+                    val result = JSEngine.getInstance().evalJS(
+                        JSEngine.getMyRule(articleListRule) + pageCache.code,
+                        ruleDTO.url
+                    )
+                    if (StringUtil.isNotEmpty(result) && result.startsWith("[") && result.endsWith("]")) {
+                        try {
+                            val articleLists: List<ArticleList> =
+                                JSEngine.getInstance().convertArticleLists(result)
+                            if (CollectionUtil.isNotEmpty(articleLists)) {
+                                pageCache.data = articleLists
+                            }
+                        } catch (e: java.lang.Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+                if (CollectionUtil.isNotEmpty(pageCache.data)) {
+                    bindArrayToView(
+                        HomeActionEnum.ARTICLE_LIST_NEW,
+                        pageCache.data?.toMutableList(),
+                        true
+                    )
+                }
+            }
+        }
+        if (cacheOnly && hasCache(requireContext(), autoCacheMd5)) {
+            return
+        }
+        if (!useCache || !hasCache(requireContext(), autoCacheMd5)) {
+            smartRefreshLayout.autoRefresh()
+        }
         loadData()
+    }
+
+    @Subscribe(threadMode = ThreadMode.POSTING)
+    fun updateCacheCode(event: CacheCode) {
+        if (activity == null || requireActivity().isFinishing || StringUtil.isEmpty(autoCacheMd5)) {
+            return
+        }
+        if (requireActivity().javaClass != MiniProgramActivity::class.java) {
+            return
+        }
+        val miniProgramActivity = activity as MiniProgramActivity
+        if (miniProgramActivity.isOnPause) {
+            return
+        }
+        cacheCode = event.code
     }
 
     fun getWebViewHolder(): ArticleWebViewHolder? {
@@ -396,6 +783,12 @@ class MiniProgramFragment(
     fun scrollTopSmooth() {
         if (getUserVisibleHint()) {
             scrollSmoothAuto(0)
+        }
+    }
+
+    fun scrollBottomSmooth() {
+        if (getUserVisibleHint()) {
+            scrollSmoothAuto(max(adapter.itemCount - 1, 0))
         }
     }
 
@@ -409,8 +802,18 @@ class MiniProgramFragment(
     }
 
     private fun loadData() {
+        if (isLoading) {
+            page = if (maxLoadedPage == 0) {
+                1
+            } else {
+                maxLoadedPage
+            }
+            return
+        }
+        isLoading = true
+        loadingPage = page
         lifecycleScope.launch(Dispatchers.IO) {
-            articleListService.params(context, page, true, articleListRule)
+            articleListService.params(context, page, true, articleListRule, notLoadPreRule())
                 .process("", this@MiniProgramFragment)
         }
     }
@@ -441,17 +844,42 @@ class MiniProgramFragment(
             if (view != null && view.tag is EditText) {
                 val edit = view.tag as EditText
                 val key = if (edit.text == null) "" else edit.text.toString()
+                KeyboardUtils.hideSoftInput(edit)
+                val inputExtra = adapter.list[position].requireExtra(
+                    InputExtra::class.java
+                )
+                if (inputExtra.isHighlight) {
+                    SettingConfig.highlightRule = key
+                    val intent = Intent(
+                        context,
+                        HighLightEditActivity::class.java
+                    )
+                    intent.putExtra("title", "高亮")
+                    if (activity is ArticleListIsland) {
+                        highlightCallback = Consumer { s: String? ->
+                            val edit0 = view.tag as EditText
+                            if (!StringUtils.equals(s, edit0.text)) {
+                                edit0.setText(s)
+                            }
+                        }
+                    }
+                    startActivityForResult(intent, 9090)
+                    return
+                }
                 if (url.startsWith("js:")) {
                     url = StringUtils.replaceOnce(url, "js:", "")
                 }
+                val finalUrl = url
                 HeavyTaskUtil.executeNewTask {
                     val result = JSEngine.getInstance().evalJS(
                         JSEngine.getMyRule(articleListRule)
                                 + JSEngine.getInstance().generateMY(
                             "MY_URL",
-                            Utils.escapeJavaScriptString(myUrl)
+                            Utils.escapeJavaScriptString(
+                                myUrl
+                            )
                         )
-                                + url, key
+                                + finalUrl, key
                     )
                     if (StringUtil.isNotEmpty(result) && !"undefined".equals(
                             result,
@@ -468,7 +896,6 @@ class MiniProgramFragment(
                         }
                     }
                 }
-                KeyboardUtils.hideSoftInput(edit)
             }
         } else {
             dealUrlPos(view, position, url)
@@ -496,6 +923,14 @@ class MiniProgramFragment(
         }
         if (PageParser.isPageUrl(url)) {
             toNextPage(position, url)
+            return
+        } else if (url.startsWith(SCHEME_FILE_SELECT)) {
+            fileSelectJs = StringUtils.replaceOnceIgnoreCase(url, SCHEME_FILE_SELECT, "")
+            fileSelectPosition = position
+            val i = Intent(Intent.ACTION_GET_CONTENT)
+            i.addCategory(Intent.CATEGORY_OPENABLE)
+            i.type = "*/*"
+            startActivityForResult(Intent.createChooser(i, "选择文件"), 9093)
             return
         } else if (DetailUIHelper.dealUrlSimply(
                 requireActivity(),
@@ -544,7 +979,7 @@ class MiniProgramFragment(
                 })
             return
         }
-        val clickText = DetailUIHelper.getTitleText(adapter.list[position].title)
+        val clickText = getItemTitle(position)
         if (urlRule.size > 1) {
             val ruleDTO = RuleDTO()
             ruleDTO.title = this.ruleDTO.title
@@ -552,6 +987,7 @@ class MiniProgramFragment(
             ruleDTO.rule = StringUtil.listToString(urlRule, 1, "@rule=")
             ruleDTO.ua = this.ruleDTO.ua
             ruleDTO.pages = this.ruleDTO.pages
+            ruleDTO.preRule = this.ruleDTO.preRule
             if (StringUtil.isNotEmpty(adapter.list[position].extra)) {
                 ruleDTO.params = adapter.list[position].extra
             }
@@ -564,13 +1000,21 @@ class MiniProgramFragment(
                     pageTitle, position, noRecordHistory
                 )
                 DataTransferUtils.putTemp(autoPageData)
+            } else {
+                DataTransferUtils.clearTemp()
             }
             memoryClick(this.ruleDTO, pageTitle, position, urlRule[0])
             MiniProgramRouter.startMiniProgram(
                 requireContext(),
                 ruleDTO.url!!,
                 clickText,
-                ruleDTO
+                ruleDTO,
+                false,
+                pageTitle,
+                this.ruleDTO.url,
+                playLast = false,
+                fromHome = false,
+                picUrl = adapter.list[position].pic
             )
             return
         } else if (X5WebViewParser.canParse(url)) {
@@ -615,32 +1059,50 @@ class MiniProgramFragment(
             )
             return
         }
+        if (url.startsWith("web://")) {
+            WebUtil.goWeb(context, url.replace("web://", ""))
+            return
+        }
         if (url.startsWith("pics://")) {
-            val imageLoader: XPopupImageLoader = PopImageLoaderNoView(articleListRule.url)
-            val imageUrls: MutableList<Any> = url.replace("pics://", "").split("&&").toMutableList()
-            val imageViewerPopupView = MyXpopup().Builder(context)
-                .asImageViewer(
-                    null,
-                    0,
-                    imageUrls,
-                    false,
-                    true,
-                    resources.getColor(R.color.gray_rice),
-                    -1,
-                    -1,
-                    true,
-                    Color.rgb(32, 36, 46),
-                    { popupView: ImageViewerPopupView, position1: Int ->
-
-                    },
-                    imageLoader
-                )
-            imageViewerPopupView.show()
+            var intentTitle = DetailUIHelper.getActivityTitle(activity)
+            if (StringUtil.isNotEmpty(intentTitle)) {
+                intentTitle = "$intentTitle-"
+            }
             memoryClick(ruleDTO, pageTitle, position, url)
+            val realRule = StringUtils.replaceOnceIgnoreCase(url, "pics://", "")
+            val urls = realRule.split("&&").toTypedArray()
+            val imageUrls = java.util.ArrayList(Arrays.asList(*urls))
+            val intent = Intent(
+                context,
+                PictureListActivity::class.java
+            )
+            intent.putStringArrayListExtra("pics", imageUrls)
+            intent.putExtra("rule", JSON.toJSONString(articleListRule))
+            PlayerChooser.checkSize(intent)
+            PlayerChooser.checkPicsSize(intent)
+            intent.putExtra("url", articleListRule.url)
+            intent.putExtra("title", DetailUIHelper.getTitleText(adapter.list[position].title))
+            val chapters1: List<VideoChapter> =
+                getChapters(url, position, intentTitle, codeAndHeader)
+            val current = PlayerChooser.putChapters(chapters1)
+            intent.putExtra("chapters", current)
+            if (activity is MiniProgramActivity) {
+                intent.putExtra("CUrl", articleListRule.url)
+                intent.putExtra("MTitle", DetailUIHelper.getActivityTitle(activity))
+            }
+            intent.putExtra("fromLastPage", true)
+            var nowPage = 0
+            for (i in chapters1.indices) {
+                if (chapters1[i].isUse) {
+                    nowPage = i
+                }
+            }
+            intent.putExtra("nowPage", nowPage)
+            startActivity(intent)
             return
         }
         val nextRule = this.ruleDTO.nextRule
-        if (!nextRule.isNullOrEmpty()) {
+        if (firstUse && !nextRule.isNullOrEmpty() && !url.startsWith("video://")) {
             val ruleDTO = RuleDTO()
             ruleDTO.title = this.ruleDTO.title
             ruleDTO.url = url + codeAndHeader
@@ -648,6 +1110,7 @@ class MiniProgramFragment(
             ruleDTO.col_type = this.ruleDTO.nextColType
             ruleDTO.ua = this.ruleDTO.ua
             ruleDTO.pages = this.ruleDTO.pages
+            ruleDTO.preRule = this.ruleDTO.preRule
             if (StringUtil.isNotEmpty(adapter.list[position].extra)) {
                 ruleDTO.params = adapter.list[position].extra
             }
@@ -660,13 +1123,21 @@ class MiniProgramFragment(
                     pageTitle, position, noRecordHistory
                 )
                 DataTransferUtils.putTemp(autoPageData)
+            } else {
+                DataTransferUtils.clearTemp()
             }
             memoryClick(this.ruleDTO, pageTitle, position, url)
             MiniProgramRouter.startMiniProgram(
                 requireContext(),
                 ruleDTO.url!!,
                 clickText,
-                ruleDTO
+                ruleDTO,
+                false,
+                null,
+                null,
+                playLast = false,
+                fromHome = false,
+                picUrl = adapter.list[position].pic
             )
             return
         }
@@ -686,7 +1157,7 @@ class MiniProgramFragment(
 //                extraDataBundle.putString("film", requireActivity().title.toString())
 //            }
             extraDataBundle.putString("rule", JSON.toJSONString(articleListRule))
-            if (chapters.size < 2) {
+            if (chapters.size < 1) {
                 PlayerChooser.startPlayer(context, clickText, url, extraDataBundle)
             } else {
                 PlayerChooser.startPlayer(
@@ -711,9 +1182,17 @@ class MiniProgramFragment(
             } else {
                 PopImageLoader(imageView, articleListRule.url)
             }
+            if (url != adapter.list[position].url) {
+                MyXpopup().Builder(context)
+                    .asImageViewer(imageView, url, imageLoader)
+                    .show()
+                return
+            }
 
             val imageUrls: MutableList<Any> = java.util.ArrayList()
-            for (i in adapter.list.indices) {
+            val currPos = 0
+            val end = min(adapter.list.size, position + 20)
+            for (i in position until end) {
                 val articleList = adapter.list[i]
                 val pic: String? = if (articleList.url == null || articleList.url.isEmpty()) {
                     articleList.pic
@@ -725,12 +1204,12 @@ class MiniProgramFragment(
                 }
             }
             if (imageLoader is PopImageLoader) {
-                imageLoader.selectPos = position
+                imageLoader.selectPos = currPos
             }
             val imageViewerPopupView = MyXpopup().Builder(context)
                 .asImageViewer(
                     imageView,
-                    position,
+                    currPos,
                     imageUrls,
                     false,
                     true,
@@ -739,7 +1218,7 @@ class MiniProgramFragment(
                     -1,
                     true,
                     Color.rgb(32, 36, 46),
-                    { popupView: ImageViewerPopupView, position1: Int ->
+                    { popupView: MyImageViewerPopupView, position1: Int ->
                         // 作用是当Pager切换了图片，需要更新源View
                         try {
                             popupView.updateSrcView(null)
@@ -774,6 +1253,31 @@ class MiniProgramFragment(
         MiniProgramRouter.startWebPage(requireContext(), url, adapter.list[position].title)
     }
 
+
+    private fun isPlayList(articleList: ArticleList?): Boolean {
+        if (articleList == null) {
+            return false
+        }
+        val baseExtra = articleList.baseExtra
+        return baseExtra != null && StringUtil.isNotEmpty(baseExtra.cls) && baseExtra.cls.contains("playlist")
+    }
+
+    private fun getPlayListCls(articleList: ArticleList?): String? {
+        if (articleList == null) {
+            return ""
+        }
+        val baseExtra = articleList.baseExtra
+        return if (baseExtra != null && StringUtil.isNotEmpty(baseExtra.cls)) baseExtra.cls else ""
+    }
+
+    private fun isSamePlayList(cls: String?, articleList: ArticleList?): Boolean {
+        if (articleList == null) {
+            return false
+        }
+        val baseExtra = articleList.baseExtra
+        return baseExtra != null && StringUtils.equals(cls, baseExtra.cls)
+    }
+
     private fun getChapters(
         url: String,
         position: Int,
@@ -782,15 +1286,21 @@ class MiniProgramFragment(
     ): MutableList<VideoChapter> {
         val chapters: MutableList<VideoChapter> = java.util.ArrayList()
         val type = adapter.list[position].type
-        //只要相同类型的
-        //只要相同类型的
+        val hasPlayListTag = isPlayList(adapter.list[position])
+        val cls = getPlayListCls(adapter.list[position])
+
         var start: Int = position
-        for (i in position - 1 downTo 0) {
-            start = if (StringUtils.equals(type, adapter.list[i].type)) {
-                i
-            } else {
-                break
+        if (!hasPlayListTag) {
+            //没用playlist标识，那么只要相同类型的
+            for (i in position - 1 downTo 0) {
+                start = if (StringUtils.equals(type, adapter.list[i].type)) {
+                    i
+                } else {
+                    break
+                }
             }
+        } else {
+            start = 0
         }
         for (i in start until position) {
             if ("header" == adapter.list[i].type) {
@@ -803,9 +1313,13 @@ class MiniProgramFragment(
             ) {
                 continue
             }
+            if (hasPlayListTag && !isSamePlayList(cls!!, adapter.list[i])) {
+                //使用了playlist标识，而当前按钮标识不一致
+                continue
+            }
             val videoChapter = VideoChapter()
             videoChapter.memoryTitle = adapter.list[i].title
-            videoChapter.title = title + DetailUIHelper.getTitleText(adapter.list[i].title)
+            videoChapter.title = getResourceTitle(title, i)
             videoChapter.url = adapter.list[i].url
             videoChapter.extra = adapter.list[i].extra
             videoChapter.realPos = i
@@ -819,7 +1333,7 @@ class MiniProgramFragment(
         }
         val videoChapter = VideoChapter()
         videoChapter.memoryTitle = adapter.list[position].title
-        videoChapter.title = title + DetailUIHelper.getTitleText(adapter.list[position].title)
+        videoChapter.title = getResourceTitle(title, position)
         videoChapter.url = url
         videoChapter.isUse = true
         videoChapter.realPos = position
@@ -838,11 +1352,19 @@ class MiniProgramFragment(
             ) {
                 continue
             }
-            if (!StringUtils.equals(type, adapter.list[i].type)) {
-                break
+
+            if (hasPlayListTag) {
+                if (!isSamePlayList(cls, adapter.list[i])) {
+                    //使用了playlist标识，而当前按钮标识不一致
+                    continue
+                }
+            } else {
+                if (!StringUtils.equals(type, adapter.list[i].type)) {
+                    break
+                }
             }
             val chapter = VideoChapter()
-            chapter.title = title + DetailUIHelper.getTitleText(adapter.list[i].title)
+            chapter.title = getResourceTitle(title, i)
             chapter.memoryTitle = adapter.list[i].title
             chapter.url = adapter.list[i].url
             chapter.extra = adapter.list[i].extra
@@ -876,8 +1398,8 @@ class MiniProgramFragment(
         url: String?
     ) {
         val clickText = adapter.list[position].title
-        if (!noHistory && clickText?.isEmpty() != true && url?.contains("#noRecordHistory#") == false) {
-            HistoryMemoryService.memoryClick(ruleDTO.url, pageTitle, position, clickText!!)
+        if (!noHistory && !clickText.isNullOrEmpty() && url?.contains("#noRecordHistory#") == false) {
+            HistoryMemoryService.memoryClick(ruleDTO.url, pageTitle, position, clickText)
         }
     }
 
@@ -894,31 +1416,120 @@ class MiniProgramFragment(
     }
 
     override fun bindArrayToView(actionType: String?, data: MutableList<ArticleList>?) {
-        val d = data ?: ArrayList()
-        updateWebViewHolder(d)
-        injectTextConfig(SettingConfig.getTextConfig(context), data!!, false)
+        bindArrayToView(actionType, data, false)
+    }
+
+    private fun bindArrayToView(
+        actionType: String?,
+        data0: MutableList<ArticleList>?,
+        fromLocal: Boolean
+    ) {
+        if (fromLocal && data0.isNullOrEmpty()) {
+            return
+        }
+        val data = data0 ?: ArrayList()
+        if (!fromLocal && page == 1 && StringUtil.isNotEmpty(autoCacheMd5)) {
+            saveCache(requireContext(), autoCacheMd5, data, cacheCode)
+        }
+        updateReadData(page == 1, data)
+        updateWebViewHolder(data)
+        val textConfig = SettingConfig.getTextConfig(context)
+        injectTextConfig(textConfig, data, false)
+        updateReadLayout(textConfig, page == 1, data)
         runWaitUI {
+            maxLoadedPage = if (page == 1) page else Math.max(maxLoadedPage, loadingPage)
+            loadingPage = -1
             if (page == 1) {
                 smartRefreshLayout.finishRefresh()
-                updateWebView()
-                if (list.size == 0) {
-                    d.addAll(0, initHeaders()!!)
+                var dynamicUpdated = false
+                if (fromLocal) {
+                    //从本地加载数据，设置等待合并状态
+                    cacheMergeState = 1
+                    Glide.get(requireContext()).clearMemory()
+                    updateWebView(false)
+                } else {
+                    //从网络加载数据
+                    if (cacheMergeState == 1) {
+                        //当成翻页处理，链接相同不更新
+                        updateWebView(true)
+                        if (!immersiveTheme) {
+                            data.addAll(0, initHeaders()!!)
+                        }
+                        //需要合并，动态刷新
+                        var lastIndex = -1
+                        for (i in adapter.list.indices) {
+                            if (data.size <= i) {
+                                break
+                            } else if (!ArticleList.equals(adapter.list[i], data[i])) {
+                                break
+                            }
+                            lastIndex = i
+                        }
+                        if (lastIndex >= 0) {
+                            if (data.size <= lastIndex + 1) {
+                                if (lastIndex + 1 < adapter.list.size) {
+                                    //减少了，移除
+                                    val rmSize = adapter.list.size - lastIndex - 1
+                                    for (i in adapter.list.size - 1 downTo lastIndex + 1) {
+                                        adapter.list.removeAt(i)
+                                    }
+                                    adapter.notifyRangeRemoved(lastIndex + 1, rmSize)
+                                } else {
+                                    //啥也不需要做
+                                }
+                            } else {
+                                if (lastIndex + 1 >= adapter.list.size) {
+                                    //只需要追加即可
+                                } else {
+                                    //要移除不同的，追加新的
+                                    val rmSize = adapter.list.size - lastIndex - 1
+                                    val hasFlex = adapter.hasFlex(lastIndex + 1, rmSize)
+                                    for (i in adapter.list.size - 1 downTo lastIndex + 1) {
+                                        adapter.list.removeAt(i)
+                                    }
+                                    if (hasFlex) {
+                                        adapter.notifyDataChanged()
+                                    } else {
+                                        adapter.notifyRangeRemoved(lastIndex + 1, rmSize)
+                                    }
+                                }
+                                val appendList: List<ArticleList> =
+                                    data.subList(lastIndex + 1, data.size)
+                                val start = adapter.list.size
+                                adapter.list.addAll(appendList)
+                                adapter.notifyRangeInserted(start, appendList.size)
+                            }
+                            dynamicUpdated = true
+                        }
+                        //合并完成
+                        cacheMergeState = 2
+                    } else {
+                        updateWebView(false)
+                    }
+                    if (cacheMergeState <= 0) {
+                        Glide.get(requireContext()).clearMemory()
+                    }
                 }
-                list.clear()
-                list.addAll(d)
-                adapter.notifyDataChanged()
+                if (!dynamicUpdated) {
+                    if (!immersiveTheme) {
+                        data.addAll(0, initHeaders()!!)
+                    }
+                    list.clear()
+                    list.addAll(data)
+                    adapter.notifyDataChanged()
+                }
                 showLastClick()
             } else {
                 smartRefreshLayout.finishLoadMore()
-                updateWebView()
+                updateWebView(true)
                 val start = list.size
-                if (list.size == 0) {
-                    d.addAll(0, initHeaders()!!)
+                if (list.size == 0 && !immersiveTheme) {
+                    data.addAll(0, initHeaders()!!)
                 }
-                list.addAll(d)
-                adapter.notifyItemRangeInserted(start, d.size)
+                list.addAll(data)
+                adapter.notifyItemRangeInserted(start, data.size)
             }
-
+            isLoading = false
             if (loadListener != null) {
                 loadListener!!.complete()
             }
@@ -928,9 +1539,6 @@ class MiniProgramFragment(
     private fun initHeaders(): List<ArticleList>? {
         val lists: MutableList<ArticleList> = java.util.ArrayList()
         lists.add(ArticleList.newBigBlank())
-        lists.add(ArticleList.newBlank())
-        lists.add(ArticleList.newBlank())
-        lists.add(ArticleList.newBlank())
         return lists
     }
 
@@ -956,19 +1564,49 @@ class MiniProgramFragment(
     }
 
     override fun bindObjectToView(actionType: String?, data: ArticleList?) {
+        isLoading = false
+        loadingPage = -1
         if (StringUtil.isEmpty(actionType) || data == null) {
             return
         }
         when (actionType) {
-            "onRefresh", "refresh" -> onRefreshJS = data.title
-            "onClose", "close" -> onCloseJS = data.title
+            "onRefresh", "refresh" -> onRefreshJS = appendJs(onRefreshJS, data.title)
+            "onClose", "close" -> onCloseJS = appendJs(onCloseJS, data.title)
             else -> {
             }
         }
     }
 
+    private fun appendJs(old: String?, newjs: String): String? {
+        if (StringUtil.isEmpty(newjs)) {
+            return old
+        }
+        return if (StringUtil.isEmpty(old)) {
+            newjs
+        } else {
+            if (old?.contains(newjs) == true) {
+                old
+            } else "$old\n;\n$newjs"
+        }
+    }
+
+    private fun hookBackJs(): String {
+        return """
+var backTag = false;
+back = (param0) => {
+   if(!backTag) {       
+        method_back.invoke(javaContext, param0);
+        backTag = true;
+   } else log('back 调用多次被拦截')
+}
+"""
+    }
+
     override fun error(title: String?, msg: String?, code: String?, e: java.lang.Exception?) {
         runOnUi {
+            isLoading = false
+            loadingPage = -1
+            page = maxLoadedPage
             loading(false)
             smartRefreshLayout.finishRefresh(true)
             smartRefreshLayout.finishLoadMore()
@@ -1046,7 +1684,7 @@ class MiniProgramFragment(
     /**
      * UI线程刷新WebView
      */
-    private fun updateWebView() {
+    private fun updateWebView(changePage: Boolean) {
         if (activity == null || requireActivity().isFinishing) {
             return
         }
@@ -1076,7 +1714,9 @@ class MiniProgramFragment(
             webViewHolder!!.progressListener = object : ArticleWebViewHolder.ProgressListener {
                 override fun onPageStarted(s: String) {}
                 override fun onProgressChanged(s: String?, i: Int) {
-                    if (StringUtil.isNotEmpty(s) && s?.startsWith("http") == true) {
+                    if (StringUtil.isNotEmpty(s) && s?.startsWith("http") == true
+                        && (webViewHolder?.x5Extra == null || webViewHolder?.x5Extra?.isShowProgress == true)
+                    ) {
                         progress_bar!!.setWebProgress(i)
                     }
                 }
@@ -1128,16 +1768,24 @@ class MiniProgramFragment(
                 }
             }
             if (StringUtil.isNotEmpty(webViewHolder!!.url) &&
-                webViewHolder!!.url != webViewHolder!!.webView.url
+                !WebUtil.equals(webViewHolder!!.webView.url, webViewHolder!!.url)
             ) {
                 //链接更新了，load新链接
                 webViewHolder!!.loadUrlCheckReferer(webViewHolder!!.url)
-                if (StringUtil.isNotEmpty(webViewHolder!!.url) && webViewHolder!!.url.startsWith("http")) {
+                if (StringUtil.isNotEmpty(webViewHolder!!.url) && webViewHolder!!.url.startsWith("http")
+                    && (webViewHolder!!.x5Extra == null || webViewHolder!!.x5Extra?.isShowProgress == true)
+                ) {
                     progress_bar!!.show()
                 }
-            } else if (StringUtil.isNotEmpty(webViewHolder!!.url) && webViewHolder!!.url == webViewHolder!!.webView.url) {
-                //链接没有更新，reload一下
-                webViewHolder!!.webView.reload()
+            } else if (StringUtil.isNotEmpty(webViewHolder!!.url) && WebUtil.equals(
+                    webViewHolder!!.webView.url,
+                    webViewHolder!!.url
+                )
+            ) {
+                //链接没有更新，并且不是翻页，reload一下
+                if (!changePage) {
+                    webViewHolder!!.webView.reload()
+                }
             } else if (StringUtil.isEmpty(webViewHolder!!.url) &&
                 StringUtil.isNotEmpty(webViewHolder!!.webView.url)
             ) {
@@ -1260,11 +1908,27 @@ class MiniProgramFragment(
 
     override fun onDestroy() {
         super.onDestroy()
+        memoryTask?.let {
+            HeavyTaskUtil.postTaskToQueue(it)
+        }
+        if (webViewHolder != null && webViewHolder!!.webView != null) {
+            webViewHolder!!.release()
+        }
+        if (readAloudHolder != null) {
+            readAloudHolder!!.shutdown()
+        }
+        Application.application.stopReadAloudService()
+        X5WebViewParser.destroy0()
+        WebkitParser.destroy0()
         if (StringUtil.isNotEmpty(onCloseJS)) {
             HeavyTaskUtil.executeNewTask {
-                JSEngine.getInstance().evalJS(JSEngine.getMyRule(articleListRule) + onCloseJS, "")
+                val js = onCloseJS
+                onCloseJS = null
+                JSEngine.getInstance()
+                    .evalJS(JSEngine.getMyRule(articleListRule) + hookBackJs() + js, "")
             }
         }
+        cancelTasks(this)
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
@@ -1275,6 +1939,11 @@ class MiniProgramFragment(
         if (webViewHolder != null && webViewHolder!!.webView != null) {
             webViewHolder!!.url = event.url
             webViewHolder!!.webView.loadUrl(event.url)
+            if (StringUtil.isNotEmpty(event.url) && event.url.startsWith("http")
+                && webViewHolder!!.x5Extra.isShowProgress
+            ) {
+                progress_bar!!.show()
+            }
             updateWebViewHeight()
         }
     }
@@ -1440,7 +2109,7 @@ class MiniProgramFragment(
                                 if (detailPopup != null) {
                                     detailPopup?.updateData(getDetailData(position))
                                 }
-                            }, null, R.layout.xpopup_confirm_input
+                            }, null, R.layout.xpopup_confirm_input_max
                         ).show()
                 }
             })
@@ -1470,14 +2139,63 @@ class MiniProgramFragment(
         activity.onBackPressed()
     }
 
+
+    fun refreshLastClick(pos: Int, click: String?, count: Int) {
+        if (count <= 0 || activity == null || requireActivity().isFinishing) {
+            return
+        }
+        if (CollectionUtil.isEmpty(adapter.list)) {
+            recyclerView.postDelayed({ refreshLastClick(pos, click, count - 1) }, 1000)
+        } else {
+            refreshLastClick0(pos, click)
+        }
+    }
+
+    private fun refreshLastClick0(pos0: Int, click: String?) {
+        var pos = pos0
+        if (CollectionUtil.isEmpty(adapter.list)) {
+            return
+        }
+        if (pos < 0 && StringUtil.isEmpty(click)) {
+            return
+        }
+        if (pos < 0) {
+            pos = findPosByTitle(pos, click ?: "")
+        }
+        if (pos >= 0 && pos < adapter.list.size) {
+            if (lastSelectedPosition >= 0 && lastSelectedPosition < adapter.list.size && adapter.list[lastSelectedPosition].isSel
+            ) {
+                adapter.list[lastSelectedPosition].isSel = false
+                adapter.notifyItemChanged(lastSelectedPosition)
+            }
+            lastSelectedPosition = pos
+            if (!adapter.list[pos].isSel) {
+                adapter.list[pos].isSel = true
+                adapter.notifyItemChanged(pos)
+            }
+        }
+    }
+
     /**
      * 显示上次播放位置
      */
     private fun showLastClick() {
         if (hasShowLastClick) {
+            if (lastSelectedPosition >= 0 && lastSelectedPosition < adapter.list.size && !adapter.list[lastSelectedPosition].isSel
+            ) {
+                adapter.list[lastSelectedPosition].isSel = true
+                adapter.notifyItemChanged(lastSelectedPosition)
+            }
             return
         }
         hasShowLastClick = true
+        if (isReadTheme) {
+            val pos: Int = getPageIndex()
+            if (pos > 0) {
+                recyclerView.scrollToPosition(pos)
+            }
+            return
+        }
         val historyDTO = HistoryMemoryService.getHistory(ruleDTO, pageTitle)
         if (historyDTO != null) {
             val pos: Int = findPosByTitle(historyDTO.clickPos, historyDTO.clickText)
@@ -1489,6 +2207,25 @@ class MiniProgramFragment(
             }
             val history = LastClickShowEvent(historyDTO.clickText, historyDTO.clickPos)
             showLastClick(history, historyDTO)
+            refreshLastClick(pos, historyDTO.clickText, 3)
+        }
+    }
+
+    /**
+     * 显示上次播放位置
+     */
+    fun showLastClickItem() {
+        if (isReadTheme) {
+            return
+        }
+        HeavyTaskUtil.executeNewTask {
+            val historyDTO = HistoryMemoryService.getHistory(ruleDTO, pageTitle)
+            if (historyDTO != null) {
+                runOnUI {
+                    val pos: Int = findPosByTitle(historyDTO.clickPos, historyDTO.clickText)
+                    refreshLastClick(pos, historyDTO.clickText, 3)
+                }
+            }
         }
     }
 
@@ -1547,6 +2284,15 @@ class MiniProgramFragment(
         if (StringUtil.isEmpty(text)) {
             return
         }
+        if (!playLastConsumed && requireActivity().intent.getBooleanExtra("playLast", false)) {
+            requireActivity().intent.removeExtra("playLast")
+            playLastConsumed = true
+            try {
+                clickByHistory(historyDTO)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         Snackbar.make(findView(R.id.snack_bar_container), "足迹：$text", Snackbar.LENGTH_LONG)
             .setAction("续看") {
                 clickByHistory(historyDTO)
@@ -1569,18 +2315,215 @@ class MiniProgramFragment(
     }
 
     private fun scrollPageByTouch() {
-        val area: ClickArea = getTouchArea()
+        val area = getTouchArea()
         if (area === ClickArea.BOTTOM || area === ClickArea.CENTER_RIGHT) {
+            if (readAloud) {
+                showReadMenu()
+                return
+            }
             scrollPageNow(true)
         } else if (area === ClickArea.TOP || area === ClickArea.CENTER_LEFT) {
+            if (readAloud) {
+                showReadMenu()
+                return
+            }
             scrollPageNow(false)
         } else if (area === ClickArea.CENTER && isReadTheme) {
-            TextConfigHelper.showConfigView(activity, { textConfig ->
-                injectTextConfig(textConfig, adapter.list, true)
+            showReadMenu()
+        }
+    }
+
+    private fun showReadMenu() {
+        TextConfigHelper.showConfigView(
+            activity,
+            { textConfig: TextConfig? ->
+                injectTextConfig(textConfig!!, adapter.list, true)
                 adapter.notifyDataChanged()
                 SettingConfig.updateTextConfig(context, textConfig)
-            }) { textConfig -> }
+                if (read_bottom_bg != null && read_chapter != null) {
+                    read_chapter?.setTextColor(textConfig.textColor)
+                    read_time?.setTextColor(textConfig.textColor)
+                    read_power?.setTextColor(textConfig.textColor)
+                }
+            },
+            { textConfig: TextConfig? -> }, autoRead, readAloud,
+            { operation: String? ->
+                when (operation) {
+                    "自动阅读" -> {
+                        autoRead = true
+                        requireActivity().window
+                            .addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        startAutoRead()
+                    }
+                    "停止自动阅读" -> {
+                        autoRead = false
+                        requireActivity().window
+                            .clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    "语音朗读" -> {
+                        readAloud = true
+                        if (readAloudHolder == null) {
+                            readAloudHolder = ReadAloudHolder()
+                        }
+                        startReadAloud(true)
+                        Application.application.startReadAloudService(
+                            activity
+                        )
+                    }
+                    "停止语音朗读" -> {
+                        readAloud = false
+                        revertReadAloudView()
+                        if (readAloudHolder != null) {
+                            readAloudHolder!!.shutdown()
+                        }
+                        Application.application.stopReadAloudService()
+                    }
+                    "切换语音引擎" -> {
+                        readAloud = true
+                        revertReadAloudView()
+                        if (readAloudHolder != null) {
+                            readAloudHolder!!.shutdown()
+                        }
+                        if (readAloudHolder == null) {
+                            readAloudHolder = ReadAloudHolder()
+                        }
+                        startReadAloud(false)
+                    }
+                }
+            }, readAloudHolder
+        )
+    }
+
+    /**
+     * 标红文字
+     */
+    private fun updateReadAloudView() {
+        if (readPosition > -1 && readPosition < adapter.list.size) {
+            val text = adapter.list[readPosition].title
+            if (StringUtil.isEmpty(text)) {
+                return
+            }
+            adapter.list[readPosition].content = text
+            adapter.list[readPosition].title = "<span style=\"color: #ed424b\">$text</span>"
+            adapter.notifyItemChanged(readPosition)
         }
+    }
+
+    /**
+     * 取消标红
+     */
+    private fun revertReadAloudView() {
+        if (readPosition > -1 && readPosition < adapter.list.size) {
+            val text = adapter.list[readPosition].content
+            if (StringUtil.isEmpty(text)) {
+                return
+            }
+            adapter.list[readPosition].title = text
+            adapter.list[readPosition].content = null
+            adapter.notifyItemChanged(readPosition)
+        }
+    }
+
+    /**
+     * 开始语音朗读
+     */
+    private fun startReadAloud(reGetPosition: Boolean) {
+        if (!readAloud || readAloudHolder == null) {
+            return
+        }
+        if (context == null || activity == null || requireActivity().isFinishing) {
+            return
+        }
+        if (reGetPosition) {
+            readPosition = gridLayoutManager!!.findFirstCompletelyVisibleItemPosition()
+        } else {
+            if (readPosition <= -1 || readPosition >= adapter.list.size) {
+                readPosition = gridLayoutManager!!.findFirstCompletelyVisibleItemPosition()
+            }
+        }
+        if (readPosition < 0) {
+            readPosition = gridLayoutManager!!.findFirstVisibleItemPosition()
+        }
+        if (readPosition < 0) {
+            readPosition = 0
+        }
+        readAloudNext()
+    }
+
+    private fun readAloudNext() {
+        if (!readAloud || readAloudHolder == null) {
+            return
+        }
+        if (readPosition > -1 && readPosition < adapter.list.size) {
+            var text = adapter.list[readPosition].title
+            text = clearText(text)
+            if (StringUtil.isEmpty(text)) {
+                //可能是个空元素
+                Timber.d("readAloudNext, empty text")
+                revertReadAloudView()
+                readPosition++
+                if (readPosition < adapter.list.size - 1) {
+                    recyclerView.scrollToPosition(readPosition + 1)
+                }
+                readAloudNext()
+                return
+            }
+            updateReadAloudView()
+            readAloudHolder!!.read(requireContext(), text!!) {
+                if (activity == null || requireActivity().isFinishing) {
+                    return@read
+                }
+                runOnUI {
+                    revertReadAloudView()
+                    readPosition++
+                    if (readPosition > -1 && readPosition < adapter.list.size) {
+                        if (readPosition < adapter.list.size - 1) {
+                            recyclerView.scrollToPosition(readPosition + 1)
+                        }
+                        readAloudNext()
+                        preloadCheckForReadAloud()
+                    } else {
+                        readPosition = -1
+                        Timber.d(
+                            "readAloudNext, readPosition: %s, list: %s",
+                            readPosition,
+                            adapter.list.size
+                        )
+                    }
+                }
+            }
+        } else {
+            Timber.d("readAloudNext, readPosition: %s, list: %s", readPosition, adapter.list.size)
+        }
+    }
+
+    private fun clearText(text: String?): String? {
+        var text = text
+        if (text == null || text.isEmpty()) {
+            return text
+        }
+        text = StringUtil.trimBlanks(text.trim { it <= ' ' }).replace("&nbsp;", "")
+        if (text.contains("</") || text.contains("<p>") || text.contains("<img") || text.contains("&lt;") || text.contains("&gt;")) {
+            val document = Jsoup.parse(text)
+            text = document.text()
+        }
+        return text
+    }
+
+    private fun startAutoRead() {
+        if (!autoRead) {
+            return
+        }
+        if (context == null || activity == null || requireActivity().isFinishing) {
+            return
+        }
+        if (!isOnPause() && gridLayoutManager != null && gridLayoutManager!!.findLastCompletelyVisibleItemPosition() + 1 < adapter.itemCount) {
+            val autoReadSpeed = PreferenceMgr.getInt(
+                context, "autoReadSpeed", 2
+            )
+            recyclerView.scrollBy(0, autoReadSpeed)
+        }
+        recyclerView.postDelayed({ startAutoRead() }, 16)
     }
 
     private fun getTouchArea(): ClickArea {
@@ -1589,11 +2532,29 @@ class MiniProgramFragment(
         } else ClickArea.BOTTOM
     }
 
-
     private fun getItemTitle(position: Int): String? {
         return if (position < 0 || position >= adapter.list.size) {
             DetailUIHelper.getActivityTitle(activity)
-        } else DetailUIHelper.getItemTitle(activity, adapter.list[position].title)
+        } else {
+            val baseExtra = adapter.list[position].baseExtra
+            if (baseExtra != null && StringUtil.isNotEmpty(baseExtra.pageTitle)) {
+                return baseExtra.pageTitle
+            }
+            if (baseExtra != null && !baseExtra.isInheritTitle) {
+                return DetailUIHelper.getTitleText(adapter.list[position].title)
+            }
+            if (requireActivity().intent.getBooleanExtra("fromHome", false)) {
+                return DetailUIHelper.getTitleText(adapter.list[position].title)
+            }
+            DetailUIHelper.getItemTitle(activity, adapter.list[position].title)
+        }
+    }
+
+    private fun getResourceTitle(activityTitle: String, position: Int): String? {
+        val baseExtra = adapter.list[position].baseExtra
+        return if (baseExtra != null && !baseExtra.isInheritTitle) {
+            DetailUIHelper.getTitleText(adapter.list[position].title)
+        } else activityTitle + DetailUIHelper.getTitleText(adapter.list[position].title)
     }
 
     private fun toNextPage(position: Int, url: String) {
@@ -1612,7 +2573,14 @@ class MiniProgramFragment(
                 if (activity != null && !requireActivity().isFinishing) {
                     requireActivity().runOnUiThread {
                         //标题处理，将html转成纯文本
-                        val title: String? = getItemTitle(position)
+                        var title: String? = getItemTitle(position)
+                        val paramsMap = HttpParser.getParamsByUrl(url)
+                        if (paramsMap.containsKey("pageTitle")) {
+                            val pageTitle = paramsMap["pageTitle"]
+                            if (StringUtil.isNotEmpty(pageTitle)) {
+                                title = pageTitle
+                            }
+                        }
                         if (nextPage.url?.contains("#noHistory#") == true) {
                             nextPage.url = StringUtils.replaceOnce(
                                 nextPage.url,
@@ -1636,12 +2604,20 @@ class MiniProgramFragment(
                                 pageTitle, position, noRecordHistory
                             )
                             DataTransferUtils.putTemp(autoPageData)
+                        } else {
+                            DataTransferUtils.clearTemp()
                         }
                         MiniProgramRouter.startMiniProgram(
                             requireContext(),
                             nextPage.url!!,
                             title!!,
-                            nextPage
+                            nextPage,
+                            false,
+                            pageTitle,
+                            this.ruleDTO.url,
+                            playLast = false,
+                            fromHome = false,
+                            picUrl = adapter.list[position].pic
                         )
                     }
                 }
@@ -1659,13 +2635,13 @@ class MiniProgramFragment(
         }
     }
 
-    private fun autoPage() {
+    private fun autoPage(memoryClick: Boolean) {
         if (activity !is MiniProgramActivity) {
             return
         }
         val activity = activity as MiniProgramActivity
         val pageData: AutoPageData? = activity.getParentData()
-        if (pageData == null || CollectionUtil.isEmpty(pageData.nextData)) {
+        if (pageData == null || CollectionUtil.isEmpty(pageData.nextData) || isLoading) {
             return
         }
         try {
@@ -1688,24 +2664,19 @@ class MiniProgramFragment(
                 rule.url = StringUtil.arrayToString(urls, 0, ";")
             }
             rule.params = currArticleList.extra
+            isLoading = true
+            loadingPage = page
             lifecycleScope.launch(Dispatchers.IO) {
                 articleListService.params(context, page, false, rule)
                     .process(HomeActionEnum.ARTICLE_LIST, this@MiniProgramFragment)
             }
-            if (!pageData.isNoRecordHistory) {
-                if (page == pageData.nextData.size) {
+            if (!pageData.isNoRecordHistory && memoryClick) {
+                if (page <= pageData.nextData.size) {
                     //已经到底了，直接记到最后
                     updateAutoPageLastClick(
                         pageData,
                         pageData.nextData[page - 1],
                         pageData.currentPos + page - 1
-                    )
-                } else {
-                    //更新历史记录，且记录上一章，因为会提前加载
-                    updateAutoPageLastClick(
-                        pageData,
-                        pageData.nextData[page - 2],
-                        pageData.currentPos + page - 2
                     )
                 }
             }
@@ -1731,6 +2702,12 @@ class MiniProgramFragment(
         HistoryMemoryService.memoryClick(pageData.cUrl, pageData.mTitle, pos, click)
     }
 
+    private fun notLoadPreRule(): Boolean {
+        return !(activity != null && page == 1 && requireActivity().intent.getBooleanExtra(
+            "needPreParse",
+            false
+        ))
+    }
 
     private fun injectTextConfig(
         textConfig: TextConfig,
@@ -1754,13 +2731,14 @@ class MiniProgramFragment(
                 } else {
                     RichTextExtra()
                 }
-                if (extra.isClick) {
+                if (isReadTheme) {
                     if (textConfig.textSize != TextConfig.UN_SET) {
                         extra.textSize = textConfig.textSize
                     }
                     if (textConfig.lineSpacingExtra != TextConfig.UN_SET) {
                         extra.lineSpacing = textConfig.lineSpacingExtra
                     }
+                    extra.tc = textConfig.textColor
                     articleList.extra = JSON.toJSONString(extra)
                     if (refreshBackground && !injectBackground) {
                         injectBackground = true
@@ -1896,7 +2874,7 @@ class MiniProgramFragment(
                 }
                 if (count > 0 && !hasFlex) {
                     //这样做是避免刷新了input组件，导致输入的内容丢失和焦点丢失
-                    adapter.notifyItemRangeRemoved(start, count)
+                    adapter.notifyRangeRemoved(start, count)
                 } else {
                     adapter.notifyDataChanged()
                 }
@@ -2000,6 +2978,273 @@ class MiniProgramFragment(
                     }
                 }
                 return
+            }
+        }
+    }
+
+    @Subscribe
+    fun onShowFileChooser(event: ShowFileChooserEvent) {
+        if (webViewHolder !== event.webViewHolder) {
+            return
+        }
+        filePathCallback = event.filePathCallback
+        val i = Intent(Intent.ACTION_GET_CONTENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        startActivityForResult(Intent.createChooser(i, "Chooser"), 9091)
+    }
+
+    /**
+     * 将段落变成多个item，方便记忆进度
+     *
+     * @param data
+     */
+    private fun updateReadData(refresh: Boolean, data: MutableList<ArticleList>) {
+        if (!isReadTheme || CollectionUtil.isEmpty(data)) {
+            return
+        }
+        synchronized(readMap) {
+            val newData: MutableList<ArticleList> =
+                java.util.ArrayList()
+            for (articleList in data) {
+                if (ArticleColTypeEnum.RICH_TEXT == ArticleColTypeEnum.getByCode(articleList!!.type)) {
+                    if (StringUtil.isNotEmpty(articleList.title)) {
+                        newData.addAll(splitRichText(articleList))
+                    } else {
+                        newData.add(articleList)
+                    }
+                } else {
+                    newData.add(articleList)
+                }
+            }
+            data.clear()
+            data.addAll(newData)
+            var lastSize = adapter.list.size
+            if (refresh) {
+                readMap.clear()
+                lastSize = 0
+            }
+            val pageData = ReadPageData()
+            pageData.size = newData.size
+            pageData.preSize = lastSize
+            pageData.pageNow = page
+            for (i in lastSize until newData.size + lastSize) {
+                readMap[i] = pageData
+            }
+            try {
+                //足迹
+                if (activity is MiniProgramActivity) {
+                    val activity = activity as MiniProgramActivity
+                    val autoPageData: AutoPageData? = activity.getParentData()
+                    if (autoPageData != null && page <= autoPageData.nextData.size) {
+                        val articleList = autoPageData.nextData[page - 1]
+                        val pos = autoPageData.currentPos + page - 1
+                        val click = articleList.title
+                        if (StringUtil.isEmpty(click) || click.length > 25) {
+                            if (click.length > 100 || !isChapterType(articleList)) {
+                                return
+                            }
+                        }
+                        pageData.chapterText = click
+                        pageData.chapterPos = pos
+                    }
+                }
+            } catch (e: java.lang.Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun splitRichText(articleList: ArticleList): List<ArticleList> {
+        val text = articleList.title
+        val strings = text.split("<br>").toTypedArray()
+        if (strings.size <= 1) {
+            return listOf(articleList)
+        }
+        val contents: MutableList<String> = java.util.ArrayList()
+        for (s in strings) {
+            if (StringUtil.trimAll(s).isNotEmpty()) {
+                contents.add(s)
+            }
+        }
+        return contents.map {
+            try {
+                val at = articleList.clone()
+                at.title = it
+                return@map at
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                return@map null
+            }
+        }.filterNotNull().toList()
+    }
+
+    private fun updateReadLayout(textConfig: TextConfig, refresh: Boolean, data: List<ArticleList>) {
+        if (!isReadTheme || data.isNullOrEmpty()) {
+            return
+        }
+        runOnUI {
+            try {
+                if (read_bottom_bg == null) {
+                    findView<View>(R.id.read_layout).visibility = View.VISIBLE
+                    read_bottom_bg = findView(R.id.read_bottom_bg)
+                    read_chapter = findView(R.id.read_chapter)
+                    read_time = findView(R.id.read_time)
+                    read_power = findView(R.id.read_power)
+                    read_chapter?.setTextColor(textConfig.textColor)
+                    read_time?.setTextColor(textConfig.textColor)
+                    read_power?.setTextColor(textConfig.textColor)
+                    ThreadTool.cancelTasks(this)
+                    ThreadTool.loadScheduleTask(this, 1000) { this.updateReadMsg() }
+                    read_bottom_bg?.post {
+                        val bottomHeight = read_bottom_bg!!.measuredHeight
+                        val body =
+                            findView<FrameLayout>(R.id.bodyContainer)
+                        body.setPadding(0, 0, 0, bottomHeight)
+                    }
+                    read_bottom_bg?.setOnClickListener {
+                        showReadMenu()
+                    }
+                }
+//                updateReadChapter(-1)
+            } catch (e: java.lang.Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun updateReadMsg() {
+        if (activity == null || requireActivity().isFinishing) {
+            return
+        }
+        memoryTask?.let {
+            HeavyTaskUtil.postTaskToQueue(it)
+        }
+        runOnUI {
+            if (activity == null || requireActivity().isFinishing) {
+                return@runOnUI
+            }
+            val currentTime = Date()
+            val formatter = SimpleDateFormat("HH:mm")
+            read_time!!.text = formatter.format(currentTime)
+            val manager =
+                requireActivity().getSystemService(Context.BATTERY_SERVICE) as BatteryManager?
+            if (manager != null) {
+                val cap =
+                    manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                read_power!!.text = "$cap%"
+            }
+        }
+    }
+
+    private fun updateReadChapter(pageNow0: Int) {
+        var pageNow = pageNow0
+        try {
+            if (read_chapter != null && activity is MiniProgramActivity) {
+                val activity = activity as MiniProgramActivity
+                val pageData: AutoPageData? = activity.getParentData()
+                if (pageData != null) {
+                    if (pageNow < 0) {
+                        //不是主动传的，取页面的页数
+                        pageNow = Math.max(0, page - 2)
+                    }
+                    val now = pageData.nextData[pageNow]
+                    read_chapter?.text = DetailUIHelper.getTitleText(now.title, false)
+                }
+            }
+        } catch (e: java.lang.Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun scrollPage(down: Boolean): Boolean {
+        if (isReadTheme) {
+            scrollPageNow(down)
+            return true
+        }
+        return false
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (!readAloud) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_VOLUME_DOWN -> return scrollPage(true)
+                KeyEvent.KEYCODE_VOLUME_UP -> return scrollPage(false)
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            9090 -> if (highlightCallback != null) {
+                highlightCallback!!.accept(SettingConfig.highlightRule)
+                highlightCallback = null
+                SettingConfig.highlightRule = ""
+            }
+            9091 -> {
+                if (filePathCallback != null) {
+                    if (resultCode == RESULT_OK) {
+                        val result = data?.data
+                        filePathCallback!!.onReceiveValue(arrayOf(result))
+                    } else if (resultCode == Activity.RESULT_CANCELED) {
+                        filePathCallback!!.onReceiveValue(null)
+                    }
+                    filePathCallback = null
+                }
+            }
+            9093 -> {
+                if (StringUtil.isNotEmpty(fileSelectJs) && resultCode == RESULT_OK) {
+                    val uri = data?.data ?: return
+                    val finalJS: String = fileSelectJs!!
+                    fileSelectJs = null
+                    val fileName = "_fileSelect_" + UriUtils.getFileName(uri)
+                    loading("文件提取中，请稍候", true)
+                    val copyTo =
+                        UriUtils.getRootDir(context) + File.separator + "cache" + File.separator + fileName
+                    FileUtil.makeSureDirExist(copyTo)
+                    UriUtils.getFilePathFromURI(
+                        context,
+                        uri,
+                        copyTo,
+                        object : UriUtils.LoadListener {
+                            override fun success(s: String) {
+                                if (activity != null && !activity!!.isFinishing) {
+                                    HeavyTaskUtil.executeNewTask {
+                                        val result = JSEngine.getInstance().evalJS(
+                                            JSEngine.getMyRule(articleListRule)
+                                                    + JSEngine.getInstance().generateMY(
+                                                "MY_URL",
+                                                Utils.escapeJavaScriptString(
+                                                    myUrl
+                                                )
+                                            )
+                                                    + finalJS,
+                                            s
+                                        )
+                                        if (activity == null || requireActivity().isFinishing) {
+                                            return@executeNewTask
+                                        }
+                                        loading(false)
+                                        runOnUi {
+                                            if (!result.isNullOrEmpty() && "undefined" != result) {
+                                                dealUrlPos(
+                                                    null,
+                                                    fileSelectPosition,
+                                                    result,
+                                                    false,
+                                                    ""
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            override fun failed(msg: String) {}
+                        })
+                }
             }
         }
     }

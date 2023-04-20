@@ -1,7 +1,6 @@
 package com.example.hikerview.ui.browser.util;
 
 import java.io.File;
-import java.text.DecimalFormat;
 import java.util.regex.Pattern;
 
 /**
@@ -73,25 +72,13 @@ public class FileUtil {
         return filePath;
     }
 
-    public static String getFormatedFileSize(long size) {
-        String result;
-        if (size == 0) {
-            return "0B";
-        }
-        DecimalFormat df = new DecimalFormat("#.00");
-        if (size < 1024) {
-            result = df.format((double) size) + "B";
-        } else if (size < 1048576) {
-            result = df.format((double) size / 1024) + "KB";
-        } else if (size < 1073741824) {
-            result = df.format((double) size / 1048576) + "MB";
-        } else {
-            result = df.format((double) size / 1073741824) + "GB";
-        }
-        return result;
-    }
-
     public static String getExtension(String fileName) {
+        if (fileName == null) {
+            return "";
+        }
+        fileName = fileName.split("\\?")[0].split("##")[0];
+        String[] s = fileName.split("/");
+        fileName = s[s.length - 1];
         if (fileName.lastIndexOf(".") < 1) {
             return "";
         }

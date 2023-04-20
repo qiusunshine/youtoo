@@ -1,6 +1,7 @@
 package com.example.hikerview.ui.browser.webview;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -8,12 +9,12 @@ import android.webkit.CookieManager;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.example.hikerview.R;
 import com.example.hikerview.constants.ArticleColTypeEnum;
 import com.example.hikerview.constants.Media;
 import com.example.hikerview.event.OnBackEvent;
 import com.example.hikerview.event.home.OnRefreshPageEvent;
 import com.example.hikerview.event.web.DestroyEvent;
-import com.example.hikerview.event.web.OnEvalJsEvent;
 import com.example.hikerview.event.web.OnImgHrefFindEvent;
 import com.example.hikerview.event.web.OnSaveAdBlockRuleEvent;
 import com.example.hikerview.event.web.OnSetAdBlockEvent;
@@ -31,6 +32,7 @@ import com.example.hikerview.ui.browser.model.DetailPage;
 import com.example.hikerview.ui.browser.model.DetectedMediaResult;
 import com.example.hikerview.ui.browser.model.DetectorManager;
 import com.example.hikerview.ui.browser.model.JSManager;
+import com.example.hikerview.ui.browser.model.JSMenu;
 import com.example.hikerview.ui.browser.model.UAModel;
 import com.example.hikerview.ui.home.FilmListActivity;
 import com.example.hikerview.ui.home.model.ArticleListRule;
@@ -40,17 +42,19 @@ import com.example.hikerview.ui.miniprogram.data.RuleDTO;
 import com.example.hikerview.ui.video.PlayerChooser;
 import com.example.hikerview.ui.video.VideoChapter;
 import com.example.hikerview.ui.view.PopImageLoaderNoView;
+import com.example.hikerview.ui.view.popup.MyXpopup;
 import com.example.hikerview.utils.AutoImportHelper;
 import com.example.hikerview.utils.FileUtil;
 import com.example.hikerview.utils.FilesInAppUtil;
+import com.example.hikerview.utils.GlideUtil;
 import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.HttpUtil;
 import com.example.hikerview.utils.ImgUtil;
 import com.example.hikerview.utils.StringUtil;
+import com.example.hikerview.utils.ThreadTool;
 import com.example.hikerview.utils.ToastMgr;
 import com.example.hikerview.utils.UriUtils;
 import com.example.hikerview.utils.WebUtil;
-import com.lxj.xpopup.XPopup;
 
 import org.adblockplus.libadblockplus.android.Utils;
 import org.apache.commons.lang3.StringUtils;
@@ -80,6 +84,7 @@ public class JsBridgeHolder {
     private Map<String, String> requestAsyncMap = new HashMap<>();
     private String tempCode = "";
     private WebViewWrapper wrapper;
+    private Map<String, List<JSMenu>> greasyForkMenuMap = new HashMap<>();
 
     public JsBridgeHolder(WeakReference<? extends Activity> reference, WebViewWrapper wrapper) {
         this.reference = reference;
@@ -94,6 +99,14 @@ public class JsBridgeHolder {
         reference = new WeakReference<>(activity);
         this.wrapper = wrapper;
         init();
+    }
+
+    public void clearGreasyForkMenu() {
+        greasyForkMenuMap.clear();
+    }
+
+    public Map<String, List<JSMenu>> getGreasyForkMenuMap() {
+        return greasyForkMenuMap;
     }
 
     private void init() {
@@ -155,7 +168,7 @@ public class JsBridgeHolder {
                 }
                 reference.get().runOnUiThread(() -> {
                     if (!wrapper.isOnPause()) {
-                        new XPopup.Builder(reference.get())
+                        new MyXpopup().Builder(reference.get())
                                 .asImageViewer(null, url, new PopImageLoaderNoView(wrapper.getUrl()))
                                 .show();
                     }
@@ -228,7 +241,7 @@ public class JsBridgeHolder {
                     return;
                 }
                 if (!wrapper.isOnPause()) {
-                    reference.get().runOnUiThread(() -> AutoImportHelper.checkAutoText(reference.get(), rule));
+                    reference.get().runOnUiThread(() -> AutoImportHelper.checkText(reference.get(), rule));
                 }
             }
 
@@ -236,6 +249,9 @@ public class JsBridgeHolder {
             public String fetch(String url, String option) {
                 if (reference.get() == null || reference.get().isFinishing()) {
                     return "";
+                }
+                if (url.startsWith("hiker://jsfile/")) {
+                    return JSManager.instance(reference.get()).getJSFileContent(url);
                 }
                 if (url.startsWith("hiker://files/")) {
                     String content = "";
@@ -252,16 +268,13 @@ public class JsBridgeHolder {
                         content = vConsole;
                     } else if ("aes.js".equals(fileName)) {
                         content = FilesInAppUtil.getAssetsString(reference.get(), fileName);
-                    } else if ("vConsoleShow.js".equals(fileName)) {
-                        if (vConsoleShow == null) {
-                            vConsoleShow = FilesInAppUtil.getAssetsString(reference.get(), fileName);
-                        }
-                        content = vConsoleShow;
                     } else if ("jquery.min.js".equals(fileName)) {
                         if (jquery == null) {
                             jquery = FilesInAppUtil.getAssetsString(reference.get(), fileName);
                         }
                         content = jquery;
+                    } else if ("greasyfork.js".equals(fileName)) {
+                        content = FilesInAppUtil.getAssetsString(reference.get(), fileName);
                     } else {
                         File file = new File(UriUtils.getRootDir(reference.get()) + File.separator + fileName);
                         if (file.exists()) {
@@ -293,9 +306,13 @@ public class JsBridgeHolder {
                     try {
                         String result = fetch(url, options);
                         requestAsyncMap.put(key, result);
-                        EventBus.getDefault().post(new OnEvalJsEvent("(function() {" +
-                                funcName + "('" + key + "', fy_bridge_app.getResultByKey('" + key + "'))" +
-                                "})();"));
+                        if (reference != null && wrapper != null && reference.get() != null && !reference.get().isFinishing()) {
+                            ThreadTool.INSTANCE.runOnUI(() -> {
+                                wrapper.evaluateJavascript("(function() {" +
+                                        funcName + "('" + key + "', fy_bridge_app.getResultByKey('" + key + "'))" +
+                                        "})();");
+                            });
+                        }
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -390,11 +407,14 @@ public class JsBridgeHolder {
                     List<String> images = Arrays.asList((urls == null ? "" : urls).split("&&"));
                     ArrayList<String> imageUrls = new ArrayList<>();
                     for (int i = 0; i < images.size(); i++) {
-                        imageUrls.add(HttpUtil.getRealUrl(wrapper.getUrl(), images.get(i)));
+                        String au = HttpUtil.getRealUrl(wrapper.getUrl(), images.get(i));
+                        au = GlideUtil.getImageUrl(au);
+                        imageUrls.add(au);
                     }
                     Intent intent = new Intent(reference.get(), PictureListActivity.class);
                     intent.putStringArrayListExtra("pics", imageUrls);
                     intent.putExtra("url", wrapper.getUrl());
+                    PlayerChooser.checkPicsSize(intent);
                     reference.get().startActivity(intent);
                 });
             }
@@ -418,6 +438,29 @@ public class JsBridgeHolder {
             public void translate(String text) {
                 if (StringUtil.isNotEmpty(text)) {
                     EventBus.getDefault().post(new ShowTranslateEvent(text));
+                }
+            }
+
+            @Override
+            public void translateBolan(String text) {
+                if (StringUtil.isNotEmpty(text)) {
+                    ThreadTool.INSTANCE.runOnUI(() -> {
+                        if (PlayerChooser.appInstalledOrNot(reference.get(), "com.hiker.bolanassist")) {
+                            Intent paramBundle = new Intent();
+                            paramBundle.setAction("android.intent.action.PROCESS_TEXT");
+                            paramBundle.putExtra(Intent.EXTRA_TEXT, text);
+                            paramBundle.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                            try {
+                                paramBundle.setComponent(new ComponentName("com.hiker.bolanassist", "com.hiker.bolanassist.ui.main.TranslateIntentActivity"));
+                                reference.get().startActivity(paramBundle);
+                                return;
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        ToastMgr.shortBottomCenter(reference.get(), "未安装波澜工具箱");
+                        wrapper.loadUrl(reference.get().getResources().getString(R.string.help_url));
+                    });
                 }
             }
 
@@ -467,7 +510,7 @@ public class JsBridgeHolder {
                 if (StringUtil.isEmpty(url)) {
                     ToastMgr.shortBottomCenter(reference.get(), "图片地址不能为空");
                 }
-                ImgUtil.savePic2Gallery(reference.get(), url, null, new ImgUtil.OnSaveListener() {
+                ImgUtil.savePic2Gallery(reference.get(), GlideUtil.getImageUrl(url), null, new ImgUtil.OnSaveListener() {
                     @Override
                     public void success(List<String> paths) {
                         if (reference.get() != null && !reference.get().isFinishing()) {
@@ -519,10 +562,11 @@ public class JsBridgeHolder {
                     ruleDTO.setUrl(page.getUrl());
                     ruleDTO.setUa(page.getUa());
                     ruleDTO.setRule(page.getFindRule());
+                    ruleDTO.setPreRule(page.getPreRule());
                     if (StringUtil.isNotEmpty(page.getPages())) {
                         ruleDTO.setPages(page.getPages());
                     }
-                    MiniProgramRouter.INSTANCE.startMiniProgram(reference.get(), page.getUrl(), page.getTitle(), ruleDTO);
+                    MiniProgramRouter.INSTANCE.startMiniProgram(reference.get(), page.getUrl(), page.getTitle(), ruleDTO, true);
                 });
             }
 
@@ -540,10 +584,12 @@ public class JsBridgeHolder {
                                 ruleDTO.setUrl(nextPage.getUrl());
                                 ruleDTO.setUa(nextPage.getUa());
                                 ruleDTO.setRule(nextPage.getFind_rule());
+                                ruleDTO.setPreRule(nextPage.getPreRule());
                                 if (StringUtil.isNotEmpty(nextPage.getPages())) {
                                     ruleDTO.setPages(nextPage.getPages());
                                 }
-                                MiniProgramRouter.INSTANCE.startMiniProgram(reference.get(), nextPage.getUrl(), title, ruleDTO);
+                                ruleDTO.setParams(nextPage.getParams());
+                                MiniProgramRouter.INSTANCE.startMiniProgram(reference.get(), nextPage.getUrl(), title, ruleDTO, true);
                             });
                         }
                     } catch (ParseException e) {
@@ -611,10 +657,44 @@ public class JsBridgeHolder {
                 String webUrl = wrapper.getMyUrl();
                 HeavyTaskUtil.executeNewTask(() -> {
                     String res = parseLazy(url, webUrl);
-                    EventBus.getDefault().post(new OnEvalJsEvent("(function() {" +
-                            "var input = '" + Utils.escapeJavaScriptString(res) + "'; eval('" + Utils.escapeJavaScriptString(callback) + "')" +
-                            "})();"));
+                    if (reference != null && wrapper != null && reference.get() != null && !reference.get().isFinishing()) {
+                        ThreadTool.INSTANCE.runOnUI(() -> {
+                            wrapper.evaluateJavascript("(function() {" +
+                                    "var input = '" + Utils.escapeJavaScriptString(res) + "'; eval('" + Utils.escapeJavaScriptString(callback) + "')" +
+                                    "})();");
+                        });
+                    }
                 });
+            }
+
+            @Override
+            public void registerMenuCommand(String rule, String menu, String func) {
+                if (!greasyForkMenuMap.containsKey(rule)) {
+                    greasyForkMenuMap.put(rule, new ArrayList<>());
+                }
+                for (JSMenu jsMenu : greasyForkMenuMap.get(rule)) {
+                    if (StringUtils.equals(menu, jsMenu.getName())) {
+                        //已经注册过了
+                        return;
+                    }
+                }
+                greasyForkMenuMap.get(rule).add(new JSMenu(menu, func));
+            }
+
+            @Override
+            public void unregisterMenuCommand(String rule, String menu) {
+                if (!greasyForkMenuMap.containsKey(rule)) {
+                    return;
+                }
+                List<JSMenu> menus = greasyForkMenuMap.get(rule);
+                if (menus != null) {
+                    for (JSMenu jsMenu : menus) {
+                        if (menu.equals(jsMenu.getName())) {
+                            menus.remove(jsMenu);
+                            return;
+                        }
+                    }
+                }
             }
 
             private String parseLazy(String url, String webUrl) {
@@ -645,15 +725,41 @@ public class JsBridgeHolder {
                 }
                 return PlayerChooser.decorateHeader(
                         wrapper.getRequestHeaderMap().get(url),
-                        referer,
+                        null,
                         url,
                         cookie
                 );
             }
 
             @Override
+            public String clearM3u8Ad(String url) {
+                String referer = wrapper.getMyUrl();
+                String cookie = "";
+                try {
+                    if (StringUtil.isNotEmpty(referer)) {
+                        cookie = wrapper.getCookie(referer);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                Map<String, String> headers = PlayerChooser.getHeaderMap(
+                        wrapper.getRequestHeaderMap().get(url),
+                        null,
+                        url,
+                        cookie
+                );
+                return parseLazy(url + "@lazyRule=.js:" + JSEngine.getInstance().generateMY("MY_HEADERS0", JSON.toJSONString(headers))
+                        + "var MY_HEADERS = JSON.parse(MY_HEADERS0); clearM3u8Ad(input, {headers: MY_HEADERS})", referer);
+            }
+
+            @Override
             public String getRequestHeaders0() {
                 return JSON.toJSONString(wrapper.getRequestHeaderMap());
+            }
+
+            @Override
+            public void openThirdApp(String scheme) {
+                wrapper.openThirdApp(scheme);
             }
         });
     }

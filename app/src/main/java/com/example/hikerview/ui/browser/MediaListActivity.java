@@ -27,13 +27,16 @@ import com.example.hikerview.ui.browser.model.DetectorManager;
 import com.example.hikerview.ui.browser.model.MediaListModel;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.download.DownloadChooser;
+import com.example.hikerview.ui.setting.model.SettingConfig;
 import com.example.hikerview.ui.video.PlayerChooser;
 import com.example.hikerview.ui.view.DialogBuilder;
 import com.example.hikerview.ui.view.PopImageLoaderNoView;
+import com.example.hikerview.ui.view.popup.MyXpopup;
 import com.example.hikerview.utils.CleanMessageUtil;
 import com.example.hikerview.utils.ClipboardUtil;
 import com.example.hikerview.utils.DebugUtil;
 import com.example.hikerview.utils.DisplayUtil;
+import com.example.hikerview.utils.GlideUtil;
 import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.MyStatusBarUtil;
 import com.example.hikerview.utils.ShareUtil;
@@ -146,12 +149,12 @@ public class MediaListActivity extends BaseSlideActivity implements View.OnClick
                     int pos = 0;
                     for (int i = 0; i < images.size(); i++) {
                         DetectedMediaResult result = images.get(i);
-                        imageUrls.add(result.getUrl());
+                        imageUrls.add(GlideUtil.getImageUrl(result.getUrl()));
                         if (url.equals(result.getUrl())) {
                             pos = i;
                         }
                     }
-                    new XPopup.Builder(getContext()).asImageViewer(null, pos, imageUrls, null, new PopImageLoaderNoView(getIntent().getStringExtra("url")))
+                    new MyXpopup().Builder(getContext()).asImageViewer(null, pos, imageUrls, null, new PopImageLoaderNoView(getIntent().getStringExtra("url")))
                             .show();
                 } else {
                     WebUtil.goWeb(getContext(), mediaResult.getUrl());
@@ -167,26 +170,24 @@ public class MediaListActivity extends BaseSlideActivity implements View.OnClick
             DetectedMediaResult mediaResult = results.get(position);
             String[] titles;
             if (Media.BLOCK.equals(mediaResult.getMediaType().getName())) {
-                titles = new String[]{"复制链接", "播放资源", "下载资源", "拦截网址", "取消拦截", "外部打开", "查看完整链接", "保存该网站的拦截规则供分享"};
+                titles = new String[]{"复制链接", "播放资源", "下载资源", "拦截网址", "取消拦截", "外部打开", "查看完整链接"};
             } else {
-                titles = new String[]{"复制链接", "播放资源", "下载资源", "拦截网址", "外部打开", "查看完整链接", "保存该网站的拦截规则供分享"};
+                titles = new String[]{"复制链接", "播放资源", "下载资源", "拦截网址", "外部打开", "查看完整链接"};
             }
             new XPopup.Builder(getContext())
                     .asCenterList("请选择操作", titles, ((option, text) -> {
                         switch (text) {
-                            case "保存该网站的拦截规则供分享":
-                                saveAdUrlForDom(null);
-                                ToastMgr.shortBottomCenter(getContext(), "已保存，在分享首页规则、搜索引擎、书签时可以同时分享该规则");
-                                break;
                             case "外部打开":
                                 ShareUtil.findChooserToDeal(getContext(), mediaResult.getUrl());
                                 break;
                             case "播放资源":
                                 HeavyTaskUtil.updateHistoryVideoUrl(getIntent().getStringExtra("url"), mediaResult.getUrl());
-                                PlayerChooser.startPlayer(getContext(), getIntent().getStringExtra("title"), mediaResult.getUrl());
+                                String videoUrl2 = PlayerChooser.decorateHeader(getActivity(), getIntent().getStringExtra("url"), mediaResult.getUrl());
+                                PlayerChooser.startPlayer(getContext(), getIntent().getStringExtra("title"), videoUrl2);
                                 break;
                             case "下载资源":
-                                DownloadChooser.startDownload(MediaListActivity.this, getIntent().getStringExtra("title"), mediaResult.getUrl());
+                                String videoUrl = PlayerChooser.decorateHeader(getActivity(), getIntent().getStringExtra("url"), mediaResult.getUrl());
+                                DownloadChooser.startDownload(MediaListActivity.this, getIntent().getStringExtra("title"), videoUrl);
                                 break;
                             case "复制链接":
                                 try {
@@ -204,17 +205,28 @@ public class MediaListActivity extends BaseSlideActivity implements View.OnClick
                                 final EditText titleE = view1.findViewById(R.id.block_add_text);
                                 View block_add_dom = view1.findViewById(R.id.block_add_dom);
                                 View block_add_url = view1.findViewById(R.id.block_add_url);
+                                View block_add_dom2 = view1.findViewById(R.id.block_add_dom2);
                                 View global = view1.findViewById(R.id.block_add_global);
                                 View domain = view1.findViewById(R.id.block_add_domain);
                                 block_add_dom.setOnClickListener(v -> {
                                     titleE.setText(StringUtil.getDom(url).split(":")[0]);
                                     block_add_url.setBackground(getDrawable(R.drawable.button_layer));
                                     block_add_dom.setBackground(getDrawable(R.drawable.button_layer_red));
+                                    block_add_dom2.setBackground(getDrawable(R.drawable.button_layer));
+                                });
+                                block_add_dom2.setOnClickListener(v -> {
+                                    String dom = StringUtil.getDom(url).split(":")[0];
+                                    String[] doms = dom.split("\\.");
+                                    titleE.setText(StringUtil.arrayToString(doms, Math.max(0, doms.length - 2), doms.length, "."));
+                                    block_add_url.setBackground(getDrawable(R.drawable.button_layer));
+                                    block_add_dom.setBackground(getDrawable(R.drawable.button_layer));
+                                    block_add_dom2.setBackground(getDrawable(R.drawable.button_layer_red));
                                 });
                                 block_add_url.setOnClickListener(v -> {
                                     titleE.setText(url);
                                     block_add_dom.setBackground(getDrawable(R.drawable.button_layer));
                                     block_add_url.setBackground(getDrawable(R.drawable.button_layer_red));
+                                    block_add_dom2.setBackground(getDrawable(R.drawable.button_layer));
                                 });
                                 global.setOnClickListener(v -> {
                                     titleE.setText(titleE.getText().toString().split("@domain=")[0]);
@@ -241,12 +253,20 @@ public class MediaListActivity extends BaseSlideActivity implements View.OnClick
                                                 AdUrlBlocker.instance().addUrl(title);
                                                 CleanMessageUtil.clearWebViewCache(getActivity());
                                                 HeavyTaskUtil.executeNewTask(() -> saveAdUrlForDom(title));
-                                                ToastMgr.shortBottomCenter(getContext(), "保存成功");
+                                                if (!SettingConfig.shouldBlock()) {
+                                                    ToastMgr.shortBottomCenter(getContext(), "保存成功，但您关闭了广告拦截，因此不会生效");
+                                                } else {
+                                                    ToastMgr.shortBottomCenter(getContext(), "保存成功");
+                                                }
                                             }
                                         }).setNegativeButton("取消", (dialog, which) -> dialog.dismiss()).show();
                                 break;
                             case "取消拦截":
                                 try {
+                                    if("abp".equals(mediaResult.getMediaType().getType())) {
+                                        ToastMgr.shortBottomCenter(getContext(), "当前链接被AdblockPlus订阅拦截，无法取消拦截");
+                                        break;
+                                    }
                                     long id = Long.parseLong(mediaResult.getMediaType().getType());
                                     if (id == 0) {
                                         ToastMgr.shortBottomCenter(getContext(), "当前链接被远程订阅的规则拦截，无法取消拦截");

@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 
 import com.example.hikerview.BuildConfig;
+import com.example.hikerview.ui.browser.data.DomainConfigKt;
 import com.example.hikerview.ui.browser.view.IVideoWebView;
 import com.example.hikerview.ui.home.ArticleListRuleEditActivity;
 import com.example.hikerview.ui.setting.model.SettingConfig;
@@ -119,7 +120,7 @@ public class AdblockHolder {
         try {
             Timber.d("Start loading %s", newUrl);
 
-            if (ArticleListRuleEditActivity.hasBlockDom(newUrl)) {
+            if (ArticleListRuleEditActivity.hasBlockDom(newUrl) || DomainConfigKt.isDisableAdBlock(newUrl)) {
                 return;
             }
             loading = true;
@@ -163,7 +164,7 @@ public class AdblockHolder {
      * @param request
      * @return
      */
-    public AbpShouldBlockResult shouldAbpBlockRequest(final WebResourceRequest request) {
+    public AbpShouldBlockResult shouldAbpBlockRequest(String referer, final WebResourceRequest request) {
         // here we just trying to fill url -> referrer map
         final String url = request.getUrl().toString();
 
@@ -235,6 +236,10 @@ public class AdblockHolder {
                     break;
                 }
                 referrerChain.add(0, parent);
+            }
+            //手动加一下referer，不加会在matches ||的时候被AdblockEngine过滤
+            if (referrerChain.isEmpty()) {
+                referrerChain.add(referer);
             }
 
             if (isMainFrame) {

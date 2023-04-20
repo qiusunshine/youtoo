@@ -1,5 +1,9 @@
 package com.example.hikerview.ui.browser;
 
+import static android.view.View.GONE;
+import static android.view.View.VISIBLE;
+import static com.example.hikerview.utils.PreferenceMgr.SETTING_CONFIG;
+
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -31,7 +35,9 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
+import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
+import android.webkit.WebHistoryItem;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.EditText;
@@ -44,6 +50,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -70,6 +77,7 @@ import com.example.hikerview.event.SearchEvent;
 import com.example.hikerview.event.ShowToastMessageEvent;
 import com.example.hikerview.event.ToastMessage;
 import com.example.hikerview.event.WebViewUrlChangedEvent;
+import com.example.hikerview.event.home.LoadingEvent;
 import com.example.hikerview.event.home.ToastEvent;
 import com.example.hikerview.event.video.BackMainEvent;
 import com.example.hikerview.event.web.BlobDownloadEvent;
@@ -79,7 +87,6 @@ import com.example.hikerview.event.web.FindMagnetsEvent;
 import com.example.hikerview.event.web.FloatVideoChangeEvent;
 import com.example.hikerview.event.web.OnBookmarkUpdateEvent;
 import com.example.hikerview.event.web.OnCreateWindowEvent;
-import com.example.hikerview.event.web.OnEvalJsEvent;
 import com.example.hikerview.event.web.OnFindInfoEvent;
 import com.example.hikerview.event.web.OnHideCustomViewEvent;
 import com.example.hikerview.event.web.OnImgHrefFindEvent;
@@ -99,13 +106,18 @@ import com.example.hikerview.event.web.OnShowFileChooserEvent;
 import com.example.hikerview.event.web.ShowSearchEvent;
 import com.example.hikerview.event.web.ShowTranslateEvent;
 import com.example.hikerview.event.web.UpdateBgEvent;
+import com.example.hikerview.model.AdBlockRule;
 import com.example.hikerview.model.BigTextDO;
 import com.example.hikerview.model.Bookmark;
 import com.example.hikerview.model.DownloadRecord;
+import com.example.hikerview.service.auth.AuthBridgeEvent;
 import com.example.hikerview.service.parser.HttpParser;
+import com.example.hikerview.service.parser.JSEngine;
 import com.example.hikerview.service.subscribe.AdUrlSubscribe;
+import com.example.hikerview.ui.ActivityManager;
 import com.example.hikerview.ui.Application;
 import com.example.hikerview.ui.bookmark.BookmarkActivity;
+import com.example.hikerview.ui.browser.data.DomainConfigKt;
 import com.example.hikerview.ui.browser.data.MagnetData;
 import com.example.hikerview.ui.browser.data.TabHistory;
 import com.example.hikerview.ui.browser.enums.ShortcutTypeEnum;
@@ -119,13 +131,22 @@ import com.example.hikerview.ui.browser.model.Shortcut;
 import com.example.hikerview.ui.browser.model.UAModel;
 import com.example.hikerview.ui.browser.model.UrlDetector;
 import com.example.hikerview.ui.browser.model.VideoTask;
+import com.example.hikerview.ui.browser.service.BrowserProxy;
+import com.example.hikerview.ui.browser.service.DomainConfigService;
+import com.example.hikerview.ui.browser.service.JSUpdaterKt;
 import com.example.hikerview.ui.browser.service.PoetryService;
+import com.example.hikerview.ui.browser.service.UpdateEvent;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.browser.util.HomeConfigUtil;
 import com.example.hikerview.ui.browser.view.BaseWebViewActivity;
 import com.example.hikerview.ui.browser.view.BrowserMenuPopup;
 import com.example.hikerview.ui.browser.view.BrowserSubMenuPopup;
+import com.example.hikerview.ui.browser.view.DomainConfigPopup;
+import com.example.hikerview.ui.browser.view.IconFloatButton;
 import com.example.hikerview.ui.browser.view.ImagesViewerPopup;
+import com.example.hikerview.ui.browser.view.JSUpdatePopup;
+import com.example.hikerview.ui.browser.view.MultiWondowTextPopup;
+import com.example.hikerview.ui.browser.view.MyCaptureActivity;
 import com.example.hikerview.ui.browser.view.ShortcutAdapter;
 import com.example.hikerview.ui.browser.view.TranslatePopup;
 import com.example.hikerview.ui.browser.view.VideoContainer;
@@ -136,11 +157,13 @@ import com.example.hikerview.ui.download.DownloadDialogUtil;
 import com.example.hikerview.ui.download.DownloadManager;
 import com.example.hikerview.ui.download.DownloadRecordsActivity;
 import com.example.hikerview.ui.home.ArticleListRuleEditActivity;
+import com.example.hikerview.ui.home.reader.EpubFile;
 import com.example.hikerview.ui.js.AdListActivity;
 import com.example.hikerview.ui.js.AdUrlListActivity;
 import com.example.hikerview.ui.js.JSListActivity;
 import com.example.hikerview.ui.miniprogram.MiniProgramRouter;
 import com.example.hikerview.ui.miniprogram.data.RuleDTO;
+import com.example.hikerview.ui.miniprogram.service.AutoCacheUtilKt;
 import com.example.hikerview.ui.picture.PictureOnlineActivity;
 import com.example.hikerview.ui.search.GlobalSearchPopup;
 import com.example.hikerview.ui.search.engine.SearchEngineMagActivity;
@@ -152,12 +175,15 @@ import com.example.hikerview.ui.setting.MoreSettingMenuPopup;
 import com.example.hikerview.ui.setting.SettingMenuPopup;
 import com.example.hikerview.ui.setting.TextSizeActivity;
 import com.example.hikerview.ui.setting.UAListActivity;
-import com.example.hikerview.ui.setting.X5DebugActivity;
+import com.example.hikerview.ui.setting.model.SearchModel;
 import com.example.hikerview.ui.setting.model.SettingConfig;
 import com.example.hikerview.ui.setting.office.AboutOfficer;
 import com.example.hikerview.ui.setting.office.AdblockOfficer;
 import com.example.hikerview.ui.setting.office.DownloadOfficer;
 import com.example.hikerview.ui.setting.office.MiniProgramOfficer;
+import com.example.hikerview.ui.setting.office.MoreSettingOfficer;
+import com.example.hikerview.ui.setting.office.MoreSettingOfficerKt;
+import com.example.hikerview.ui.setting.office.NormalSettingOfficer;
 import com.example.hikerview.ui.setting.office.XiuTanOfficer;
 import com.example.hikerview.ui.setting.updaterecords.UpdateRecord;
 import com.example.hikerview.ui.setting.updaterecords.UpdateRecordsActivity;
@@ -167,7 +193,8 @@ import com.example.hikerview.ui.video.EmptyActivity;
 import com.example.hikerview.ui.video.FloatVideoController;
 import com.example.hikerview.ui.video.PlayerChooser;
 import com.example.hikerview.ui.video.VideoChapter;
-import com.example.hikerview.ui.view.DialogBuilder;
+import com.example.hikerview.ui.view.CustomBottomPopup;
+import com.example.hikerview.ui.view.CustomColorPopup;
 import com.example.hikerview.ui.view.HorizontalWebView;
 import com.example.hikerview.ui.view.MutiWondowAdapter;
 import com.example.hikerview.ui.view.MutiWondowPopup;
@@ -176,7 +203,8 @@ import com.example.hikerview.ui.view.RelativeListenLayout;
 import com.example.hikerview.ui.view.XiuTanResultPopup;
 import com.example.hikerview.ui.view.animate.AnimateTogetherUtils;
 import com.example.hikerview.ui.view.colorDialog.ColorDialog;
-import com.example.hikerview.ui.view.colorDialog.PromptDialog;
+import com.example.hikerview.ui.view.popup.InputConfirmPopup;
+import com.example.hikerview.ui.view.popup.MyXpopup;
 import com.example.hikerview.ui.view.popup.ShortcutInputPopup;
 import com.example.hikerview.ui.view.popup.SimpleHintPopupWindow;
 import com.example.hikerview.utils.AlertNewVersionUtil;
@@ -207,11 +235,11 @@ import com.example.hikerview.utils.WebUtil;
 import com.example.hikerview.utils.permission.PermissionConstants;
 import com.example.hikerview.utils.permission.XPermission;
 import com.example.hikerview.utils.view.DialogUtil;
+import com.example.hikerview.utils.view.ImageUtilKt;
 import com.google.android.material.snackbar.BaseTransientBottomBar;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.zxing.Result;
 import com.king.app.updater.constant.Constants;
-import com.king.app.updater.http.HttpManager;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.core.BasePopupView;
 import com.lxj.xpopup.enums.PopupPosition;
@@ -221,7 +249,6 @@ import com.lxj.xpopup.util.KeyboardUtils;
 import com.tencent.smtt.export.external.TbsCoreSettings;
 import com.tencent.smtt.sdk.QbSdk;
 import com.xunlei.downloadlib.parameter.TorrentFileInfo;
-import com.yzq.zxinglibrary.android.CaptureActivity;
 import com.yzq.zxinglibrary.common.Constant;
 import com.yzq.zxinglibrary.decode.DecodeImgCallback;
 import com.yzq.zxinglibrary.decode.DecodeImgThread;
@@ -236,17 +263,18 @@ import org.greenrobot.eventbus.ThreadMode;
 import org.litepal.LitePal;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import chuangyuan.ycj.videolibrary.video.VideoPlayerManager;
+import kotlin.Unit;
 import me.jingbin.progress.WebProgress;
 import timber.log.Timber;
-
-import static android.view.View.GONE;
-import static android.view.View.VISIBLE;
 
 /**
  * 作者：By hdy
@@ -282,7 +310,6 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     private BrowserMenuPopup browserMenuPopup;
     private FrameLayout.LayoutParams layoutParams;
     private CoordinatorLayout snackBarBg;
-    private String adBlockRule;
     private ValueCallback<Uri[]> filePathCallback;
     private View leftIcon, rightIcon;
     private ImageView leftIconView, rightIconView;
@@ -315,12 +342,13 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     private static final int REQUEST_CODE_SCAN = 2401;
     private ImageView slogan;
     private boolean appOpenTemp = false;
-    private LoadingPopupView loadingPopupView;
     private FloatVideoController floatVideoController;
     private String videoPlayingWebUrl;
     private View magnet_bg;
     private TextView magnet_text;
     private XiuTanResultPopup magnetPopup;
+    private LoadingPopupView globalLoadingView;
+    private List<UpdateEvent> jsUpdateEvents;
 
     @Override
     protected int initLayout(Bundle savedInstanceState) {
@@ -386,6 +414,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
+                BrowserProxy.INSTANCE.initProxyRules();
                 try {
                     if (!AdblockHelper.get().isInit()) {
                         // init Adblock
@@ -398,6 +427,11 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
+                try {
+                    ThunderManager.INSTANCE.globalInit(getContext());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             });
             //延时执行
             webViewBg.postDelayed(() -> {
@@ -406,28 +440,31 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 }
                 //初始化可以后台初始化的配置
                 HeavyTaskUtil.executeNewTask(DetectorManager::getInstance);
-                //搜集本地tbs内核信息并上报服务器，服务器返回结果决定使用哪个内核。
-                QbSdk.PreInitCallback cb = new QbSdk.PreInitCallback() {
-                    @Override
-                    public void onViewInitFinished(boolean arg0) {
-                        //x5內核初始化完成的回调，为true表示x5内核加载成功，否则表示x5内核加载失败，会自动切换到系统内核。
-                        Timber.d(" onViewInitFinished is %s", arg0);
-                    }
+                int nowAppVersion = PreferenceMgr.getInt(getContext(), "version", "hiker", 0);
+                if (SettingConfig.AppVersion <= nowAppVersion) {
+                    //搜集本地tbs内核信息并上报服务器，服务器返回结果决定使用哪个内核。
+                    QbSdk.PreInitCallback cb = new QbSdk.PreInitCallback() {
+                        @Override
+                        public void onViewInitFinished(boolean arg0) {
+                            //x5內核初始化完成的回调，为true表示x5内核加载成功，否则表示x5内核加载失败，会自动切换到系统内核。
+                            Timber.d(" onViewInitFinished is %s", arg0);
+                        }
 
-                    @Override
-                    public void onCoreInitFinished() {
+                        @Override
+                        public void onCoreInitFinished() {
+                        }
+                    };
+                    // 在调用TBS初始化、创建WebView之前进行如下配置
+                    HashMap<String, Object> map = new HashMap<>();
+                    map.put(TbsCoreSettings.TBS_SETTINGS_USE_SPEEDY_CLASSLOADER, true);
+                    map.put(TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE, true);
+                    QbSdk.initTbsSettings(map);
+                    //x5内核初始化接口
+                    try {
+                        QbSdk.initX5Environment(getContext(), cb);
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
-                };
-                // 在调用TBS初始化、创建WebView之前进行如下配置
-                HashMap<String, Object> map = new HashMap<>();
-                map.put(TbsCoreSettings.TBS_SETTINGS_USE_SPEEDY_CLASSLOADER, true);
-                map.put(TbsCoreSettings.TBS_SETTINGS_USE_DEXLOADER_SERVICE, true);
-                QbSdk.initTbsSettings(map);
-                //x5内核初始化接口
-                try {
-                    QbSdk.initX5Environment(getContext(), cb);
-                } catch (Exception e) {
-                    e.printStackTrace();
                 }
                 if (PreferenceMgr.getInt(getContext(), "version", "hiker", 0) != 0) {
                     showUpdateRecords();
@@ -463,6 +500,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             }
             return false;
         });
+//        WebView.setWebContentsDebuggingEnabled(true);
     }
 
     private void initFloatVideo() {
@@ -503,10 +541,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void recoverLastTabNow(List<TabHistory> tabs) {
-        if (tabs.size() == 1) {
-            webViewT.loadUrl(tabs.get(0).getUrl());
-            return;
-        }
+        boolean hasUrl = webViewT != null && StringUtil.isNotEmpty(webViewT.getUrl());
         int pos = -1;
         for (int i = 0; i < tabs.size(); i++) {
             if (tabs.get(i).isUse()) {
@@ -517,10 +552,16 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (pos == -1) {
             pos = tabs.size() - 1;
         }
-        showWebViewByPos(pos + 1);
-        removeByPos(0);
+        if (hasUrl) {
+            //已经有链接的情况下，直接换一下位置到最后即可
+            HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).getWebViewList().remove(0);
+            MultiWindowManager.instance(WebViewActivity.this).getWebViewList().add(webView);
+        } else {
+            showWebViewByPos(pos + 1);
+            removeByPos(0);
+        }
         webViewBg.setTag("white");
-        webViewBg.setBackgroundColor(Color.WHITE);
+        webViewBg.setBackgroundColor(getBackgroundColor());
     }
 
     private int getBottomBarLayoutId(int bottomBar) {
@@ -538,19 +579,63 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     private void initBottomBar() {
         bottomTitleView = findView(R.id.bottom_bar_title);
         bottomBar = findView(R.id.bottom_bar_bg);
+        int dp10 = DisplayUtil.dpToPx(getContext(), 10);
+        WindowManager manager = getWindowManager();
+        DisplayMetrics outMetrics = new DisplayMetrics();
+        manager.getDefaultDisplay().getMetrics(outMetrics);
+        int height = outMetrics.heightPixels;
+        int width = outMetrics.widthPixels;
+        boolean land = height < width;
+        if (land) {
+            bottomBar.setPadding(width / 6 + dp10, 0, width / 6 + dp10, 0);
+        } else {
+            bottomBar.setPadding(dp10, 0, dp10, 0);
+        }
         bottom_bar_refresh = findView(R.id.bottom_bar_refresh);
         View bottom_bar_home = findView(R.id.bottom_bar_home);
         bottom_bar_muti = findView(R.id.bottom_bar_muti);
         bottomBarMenu = findView(R.id.bottom_bar_menu);
         if (!hasBackground()) {
-            bottomBar.setBackground(getResources().getDrawable(R.drawable.shape_top_border));
+            updateBottomBarBackground();
         } else {
             bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackground(null);
         }
         bottomHomeIcon = findView(R.id.home);
         bottomTitleView.setOnClickListener(this);
-        bottomTitleView.setOnLongClickListener(view -> {
-            backToHomeHtml();
+        bottomTitleView.setOnLongClickListener(v -> {
+            XPopup.setAnimationDuration(200);
+            new XPopup.Builder(getContext())
+                    .atView(v)
+                    .hasShadowBg(false)
+                    .asAttachList(new String[]{"回到主页", "复制链接", "分享链接", "粘贴前往"}, null, (position, text) -> {
+                        switch (text) {
+                            case "回到主页":
+                                backToHomeHtml();
+                                break;
+                            case "复制链接":
+                                if (webViewT == null || StringUtil.isEmpty(webViewT.getUrl())) {
+                                    ToastMgr.shortBottomCenter(getContext(), "没有链接可复制，请先访问网站");
+                                    break;
+                                }
+                                ClipboardUtil.copyToClipboardForce(getContext(), webViewT.getUrl());
+                                break;
+                            case "分享链接":
+                                if (webViewT == null || StringUtil.isEmpty(webViewT.getUrl())) {
+                                    ToastMgr.shortBottomCenter(getContext(), "没有链接可分享，请先访问网站");
+                                    break;
+                                }
+                                ShareUtil.shareText(getContext(), bottomTitleView.getText() + "\n" + webViewT.getUrl());
+                                break;
+                            case "粘贴前往":
+                                ClipboardUtil.getText(getContext(), v, text1 -> {
+                                    SearchEngine engine = SearchModel.getDefaultWebEngine(getContext());
+                                    SearchEvent event = new SearchEvent(text1, engine, "web", null, null, false);
+                                    onSearch(event);
+                                });
+                                break;
+                        }
+                    }).show();
+            v.postDelayed(() -> XPopup.setAnimationDuration(300), 200);
             return true;
         });
         bottom_bar_refresh.setOnClickListener(this);
@@ -573,7 +658,27 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         });
         bottom_bar_muti.setOnClickListener(this);
         bottom_bar_muti.setOnLongClickListener(v -> {
-            addWindow(null);
+            XPopup.setAnimationDuration(200);
+            new XPopup.Builder(getContext())
+                    .atView(v)
+                    .hasShadowBg(false)
+                    .asAttachList(new String[]{"新建窗口", "清除其它窗口", "清除全部窗口"}, null, (position, text) -> {
+                        switch (text) {
+                            case "新建窗口":
+                                addWindow(null);
+                                break;
+                            case "清除其它窗口":
+                                clearOtherWebView();
+                                break;
+                            case "清除全部窗口":
+                                HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).clear();
+                                showNewWebView(webView);
+                                ToastMgr.shortBottomCenter(getContext(), "已清除所有窗口");
+                                HeavyTaskUtil.saveTabHistory(getActivity());
+                                break;
+                        }
+                    }).show();
+            v.postDelayed(() -> XPopup.setAnimationDuration(300), 200);
             return true;
         });
         bottomBarMenu.setOnClickListener(this);
@@ -643,7 +748,8 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         ImageView imageView = bg.findViewById(R.id.backgroundImageView);
         bg.setBackground(null);
         imageView.setVisibility(VISIBLE);
-        GlideUtil.loadPicDrawable(getContext(), imageView, getHomeBackground(), new RequestOptions());
+        String path = getHomeBackground();
+        GlideUtil.loadPicDrawable(getContext(), imageView, path, new RequestOptions());
         boolean home_logo_dark = PreferenceMgr.getBoolean(getContext(), "home_logo_dark", false);
         View shortcut_search = findViewById(R.id.shortcut_search);
         shortcut_search.setBackground(getResources().getDrawable(!home_logo_dark ? R.drawable.check_bg_trans_border_white : R.drawable.check_bg_trans));
@@ -657,6 +763,18 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 wic.setAppearanceLightStatusBars(true);
             }
         }
+        updateNavBarColor(path);
+    }
+
+    private void updateNavBarColor(String path) {
+        ImageUtilKt.loadDominantColor(getContext(), path, color -> {
+            if (getActivity() != null && !getActivity().isFinishing()) {
+                ThreadTool.INSTANCE.runOnUI(() -> {
+                    getWindow().setNavigationBarColor(color);
+                });
+            }
+            return Unit.INSTANCE;
+        });
     }
 
     private WindowInsetsControllerCompat getWindowInsetsController() {
@@ -689,7 +807,8 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         ImageView imageView = bg.findViewById(R.id.backgroundImageView);
         bg.setBackground(null);
         imageView.setVisibility(VISIBLE);
-        GlideUtil.loadPicDrawable(getContext(), imageView, getHomeBackground(), new RequestOptions());
+        String path = getHomeBackground();
+        GlideUtil.loadPicDrawable(getContext(), imageView, path, new RequestOptions());
         View shortcut_search = findViewById(R.id.shortcut_search);
         shortcut_search.setBackground(getResources().getDrawable(!home_logo_dark ? R.drawable.check_bg_trans_border_white : R.drawable.check_bg_trans));
         ImageView shortcut_search_scan = findViewById(R.id.shortcut_search_scan);
@@ -719,11 +838,12 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (bottomBar != null) {
             bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackground(null);
         }
+        updateNavBarColor(path);
     }
 
     private void clearBackground() {
         background = null;
-        bottomBar.setBackground(getResources().getDrawable(R.drawable.shape_top_border));
+        updateBottomBarBackground();
         AndroidBarUtils.setTranslucentStatusBar(this, false);
         View bg = findView(R.id.bg);
         bg.setBackgroundColor(getResources().getColor(R.color.white));
@@ -743,9 +863,9 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (!isLand()) {
             slogan.setVisibility(VISIBLE);
         }
-        bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackgroundColor(getResources().getColor(R.color.gray_rice));
         PreferenceMgr.put(getContext(), "home_bg", "");
         ToastMgr.shortBottomCenter(getContext(), "主页背景图已清除");
+        getWindow().setNavigationBarColor(0xffffffff);
     }
 
     private void getDefaultShortcuts() {
@@ -787,7 +907,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         }
         int finalIndex = index;
         HeavyTaskUtil.executeNewTask(() -> {
-            int count1 = LitePal.count(Bookmark.class);
+            int count1 = LitePal.where("dir <= 0").count(Bookmark.class);
             int count2 = LitePal.count(DownloadRecord.class);
             int count3 = JSManager.instance(getContext()).listAllJsFileNames().size();
             String url = count1 + "@@" + count2 + "@@" + count3;
@@ -850,7 +970,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                         .callback(new XPermission.SimpleCallback() {
                             @Override
                             public void onGranted() {
-                                Intent intent = new Intent(getContext(), CaptureActivity.class);
+                                Intent intent = new Intent(getContext(), MyCaptureActivity.class);
                                 startActivityForResult(intent, REQUEST_CODE_SCAN);
                             }
 
@@ -876,11 +996,13 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         shortcutAddView.setOnClickListener(v -> {
             ShortcutInputPopup inputPopup = new ShortcutInputPopup(getContext())
                     .bind(new Shortcut(), shortcut1 -> {
-                        if (StringUtil.isEmpty(shortcut1.getName())) {
+                        if (StringUtil.isEmpty(shortcut1.getName()) &&
+                                !ShortcutTypeEnum.POETRY.name().equals(shortcut1.getType())) {
                             ToastMgr.shortBottomCenter(getContext(), "名称不能为空");
                             return;
                         }
                         if (StringUtil.isNotEmpty(shortcut1.getIcon()) && (shortcut1.getIcon().startsWith("http")
+                                || shortcut1.getIcon().startsWith("file://") || shortcut1.getIcon().startsWith("/")
                                 || shortcut1.getIcon().startsWith("hiker://images/") || shortcut1.getIcon().startsWith("color://"))) {
 //                            shortcut1.setIcon(shortcut1.getIcon());
                         } else {
@@ -893,6 +1015,9 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                         if (ShortcutTypeEnum.DATA.name().equals(shortcut1.getType())) {
                             updateData(shortcut1);
                         }
+                        if (ShortcutTypeEnum.POETRY.name().equals(shortcut1.getType())) {
+                            updatePoetry(shortcut1);
+                        }
                     });
             new XPopup.Builder(getContext())
                     .asCustom(inputPopup)
@@ -902,58 +1027,70 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         shortcutAdapter.setOnItemClickListener(new ShortcutAdapter.OnItemClickListener() {
             @Override
             public void onClick(View v, int position) {
-                Shortcut shortcut = shortcuts.get(position);
-                if (shortcut.isDragging()) {
-                    ShortcutInputPopup inputPopup = new ShortcutInputPopup(getContext())
-                            .bind(shortcut, shortcut1 -> {
-                                if (StringUtil.isEmpty(shortcut1.getName())) {
-                                    ToastMgr.shortBottomCenter(getContext(), "名称不能为空");
-                                    return;
-                                }
-                                if (StringUtil.isNotEmpty(shortcut1.getIcon()) && (shortcut1.getIcon().startsWith("http")
-                                        || shortcut1.getIcon().startsWith("hiker://images/") || shortcut1.getIcon().startsWith("color://"))) {
-                                    shortcut.setIcon(shortcut1.getIcon());
-                                } else if (StringUtil.isEmpty(shortcut1.getIcon()) && StringUtil.isNotEmpty(shortcut.getIcon())
-                                        && !shortcut.getIcon().startsWith("color")) {
-                                    String ic = "color://" + BookmarkActivity.colors[RandomUtil.getRandom(0, BookmarkActivity.colors.length)];
-                                    shortcut.setIcon(ic);
-                                }
-                                shortcut.setName(shortcut1.getName());
-                                shortcut.setType(shortcut1.getType());
-                                shortcut.setUrl(shortcut1.getUrl());
-                                BigTextDO.updateShortcuts(getContext(), Shortcut.toStr(shortcuts));
-                                shortcutAdapter.notifyItemChanged(position);
-                            });
-                    new XPopup.Builder(getContext())
-                            .asCustom(inputPopup)
-                            .show();
-                } else {
-                    ShortcutTypeEnum typeEnum = ShortcutTypeEnum.Companion.getByCode(shortcut.getType());
-                    if (typeEnum == ShortcutTypeEnum.POETRY) {
-//                        new XPopup.Builder(getContext())
-//                                .asConfirm("诗词", shortcut.getName(), () -> {
-//                                })
-//                                .show();
-                    } else if (typeEnum == ShortcutTypeEnum.DATA) {
-                        Object tag = v.getTag();
-                        if ("bookmark".equals(tag)) {
-                            startActivityForResult(new Intent(getContext(), BookmarkActivity.class), 101);
-                        } else if ("download".equals(tag)) {
-                            Intent intent2 = new Intent(getContext(), DownloadRecordsActivity.class);
-                            intent2.putExtra("downloaded", true);
-                            startActivity(intent2);
-                        } else if ("plugin".equals(tag)) {
-                            startActivity(new Intent(getContext(), JSListActivity.class));
-                        } else if ("bizhi".equals(tag)) {
-                            showBackgroundSetting(v, shortcut);
-                        }
-                    } else if (!shortcut.getUrl().startsWith("http") && !shortcut.getUrl().startsWith("file")) {
-                        overrideUrlLoading2(new OnOverrideUrlLoadingForOther(shortcut.getUrl()));
+                try {
+                    Shortcut shortcut = shortcuts.get(position);
+                    if (shortcut.isDragging()) {
+                        ShortcutInputPopup inputPopup = new ShortcutInputPopup(getContext())
+                                .bind(shortcut, shortcut1 -> {
+                                    if (StringUtil.isEmpty(shortcut1.getName())) {
+                                        ToastMgr.shortBottomCenter(getContext(), "名称不能为空");
+                                        return;
+                                    }
+                                    if (StringUtil.isNotEmpty(shortcut1.getIcon()) && (shortcut1.getIcon().startsWith("http")
+                                            || shortcut1.getIcon().startsWith("file://") || shortcut1.getIcon().startsWith("/")
+                                            || shortcut1.getIcon().startsWith("hiker://images/") || shortcut1.getIcon().startsWith("color://"))) {
+                                        shortcut.setIcon(shortcut1.getIcon());
+                                    } else if (StringUtil.isEmpty(shortcut1.getIcon()) && StringUtil.isNotEmpty(shortcut.getIcon())
+                                            && !shortcut.getIcon().startsWith("color")) {
+                                        String ic = "color://" + BookmarkActivity.colors[RandomUtil.getRandom(0, BookmarkActivity.colors.length)];
+                                        shortcut.setIcon(ic);
+                                    }
+                                    shortcut.setName(shortcut1.getName());
+                                    shortcut.setType(shortcut1.getType());
+                                    shortcut.setUrl(shortcut1.getUrl());
+                                    BigTextDO.updateShortcuts(getContext(), Shortcut.toStr(shortcuts));
+                                    shortcutAdapter.notifyItemChanged(position);
+                                });
+                        new XPopup.Builder(getContext())
+                                .asCustom(inputPopup)
+                                .show();
                     } else {
-                        if (webViewT != null) {
-                            webViewT.loadUrl(shortcut.getUrl());
+                        ShortcutTypeEnum typeEnum = ShortcutTypeEnum.Companion.getByCode(shortcut.getType());
+                        if (typeEnum == ShortcutTypeEnum.POETRY) {
+                            TextView textView = v.findViewById(R.id.textView);
+                            if (textView != null) {
+                                String p = textView.getText().toString();
+                                new XPopup.Builder(getContext())
+                                        .asConfirm("诗词", p, "取消", "复制", () -> {
+                                            ClipboardUtil.copyToClipboardForce(getContext(), p);
+                                        }, () -> {
+
+                                        }, false)
+                                        .show();
+                            }
+                        } else if (typeEnum == ShortcutTypeEnum.DATA) {
+                            Object tag = v.getTag();
+                            if ("bookmark".equals(tag)) {
+                                startActivityForResult(new Intent(getContext(), BookmarkActivity.class), 101);
+                            } else if ("download".equals(tag)) {
+                                Intent intent2 = new Intent(getContext(), DownloadRecordsActivity.class);
+                                intent2.putExtra("downloaded", true);
+                                startActivity(intent2);
+                            } else if ("plugin".equals(tag)) {
+                                startActivity(new Intent(getContext(), JSListActivity.class));
+                            } else if ("bizhi".equals(tag)) {
+                                showBackgroundSetting(v, shortcut);
+                            }
+                        } else if (!shortcut.getUrl().startsWith("http") && !shortcut.getUrl().startsWith("file")) {
+                            overrideUrlLoading2(new OnOverrideUrlLoadingForOther(shortcut.getUrl()));
+                        } else {
+                            if (webViewT != null) {
+                                webViewT.loadUrl(shortcut.getUrl());
+                            }
                         }
                     }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
 
@@ -1047,11 +1184,27 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         int width = outMetrics.widthPixels;
         boolean land = height < width;
         View shortcut_container = findView(R.id.shortcut_container);
+
+        int dp10 = DisplayUtil.dpToPx(getContext(), 10);
+        int viewWidth = shortcut_container.getMeasuredWidth();
+        Timber.d("refreshHomeMargin land: width=%d, viewWidth=%d", width, viewWidth);
+        if (land && viewWidth > 0) {
+            if (viewWidth < width) {
+                //view宽度比width小，不能当成横屏处理
+                land = false;
+            }
+        }
         if (land) {
             slogan.setVisibility(GONE);
             shortcut_container.setPadding(width / 6, 0, width / 6, 0);
+            if (bottomBar != null) {
+                bottomBar.setPadding(width / 6 + dp10, 0, width / 6 + dp10, 0);
+            }
         } else {
             shortcut_container.setPadding(0, 0, 0, 0);
+            if (bottomBar != null) {
+                bottomBar.setPadding(dp10, 0, dp10, 0);
+            }
             if (!hasBackground()) {
                 slogan.setVisibility(VISIBLE);
             }
@@ -1089,7 +1242,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 ops, s -> {
             switch (s) {
                 case "查看大图":
-                    new XPopup.Builder(getContext())
+                    new MyXpopup().Builder(getContext())
                             .asImageViewer(null, shortcut.getIcon(), new PopImageLoaderNoView(null))
                             .show();
                     break;
@@ -1215,8 +1368,24 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void initMenuPopup() {
-        browserMenuPopup = new BrowserMenuPopup(this, iconTitle -> {
-            switch (iconTitle.getTitle()) {
+        int jsCount = webViewT != null && webViewT.getWebViewHelper() != null ?
+                webViewT.getWebViewHelper().getGreasyForkRules().size() : 0;
+        browserMenuPopup = new BrowserMenuPopup(this, tt -> {
+            if (tt.startsWith("插件")) {
+                if (jsCount > 0) {
+                    List<String> greasyForkRules = webViewT.getWebViewHelper().getGreasyForkRules();
+                    if (CollectionUtil.isEmpty(greasyForkRules)) {
+                        startActivity(new Intent(getContext(), JSListActivity.class));
+                    } else {
+                        showGreasyForkMenu();
+                    }
+                } else {
+                    startActivity(new Intent(getContext(), JSListActivity.class));
+                }
+                return;
+            }
+            switch (tt) {
+                case "加书签":
                 case "加入书签":
                     if (webViewBg.getVisibility() != VISIBLE) {
                         ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
@@ -1250,7 +1419,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     intent.putExtra("title", getWebTitle());
                     startActivityForResult(intent, 101);
                     break;
-                case "历史记录":
+                case "历史":
                     startActivity(new Intent(getContext(), HistoryListActivity.class));
                     break;
                 case "工具箱":
@@ -1259,17 +1428,38 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 case "视频嗅探":
                     showMenu(bottomBarMenu);
                     break;
-                case "分享链接":
+                case "全屏显示":
+                    toggleFullTheme();
+                    break;
+                case "刷新":
                     if (webViewBg.getVisibility() != VISIBLE) {
                         ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
                         break;
                     }
-                    ShareUtil.shareText(getContext(), bottomTitleView.getText() + "\n" + webViewT.getUrl());
+                    if (webViewT != null) {
+                        webViewT.reload();
+                    }
                     break;
-                case "插件管理":
-                    startActivity(new Intent(getContext(), JSListActivity.class));
+                case "标记广告":
+                    if (webViewBg.getVisibility() != VISIBLE) {
+                        ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
+                        break;
+                    }
+                    showDebugView(true);
+                    getWebView().evaluateJavascript("(function(){window.setDebugState(true)})();", null);
+                    ToastMgr.shortBottomCenter(getContext(), "触摸可选择元素，无需点击");
+                    break;
+                case "网站配置":
+                    if (webViewBg.getVisibility() != VISIBLE) {
+                        ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
+                        break;
+                    }
+                    new XPopup.Builder(getContext())
+                            .asCustom(new DomainConfigPopup(getActivity(), StringUtil.getDom(webViewT.getUrl())))
+                            .show();
                     break;
                 case "无图模式":
+                case "关闭无图":
                     blockImg = !blockImg;
                     PreferenceMgr.put(getContext(), "blockImg", blockImg);
                     ToastMgr.shortBottomCenter(getContext(), "已" + (blockImg ? "开启" : "关闭") + "无图模式");
@@ -1280,28 +1470,6 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     break;
                 case "书签":
                     startActivityForResult(new Intent(getContext(), BookmarkActivity.class), 101);
-                    break;
-                case "查看源码":
-                    if (webViewBg.getVisibility() != VISIBLE) {
-                        ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
-                        break;
-                    }
-                    if (StringUtil.isEmpty(webViewT.getUrl())) {
-                        ToastMgr.shortBottomCenter(getContext(), "页面链接为空");
-                        break;
-                    }
-                    String url = webViewT.getUrl().startsWith("view-source:") ? webViewT.getUrl().replace("view-source:", "") : webViewT.getUrl();
-                    new XPopup.Builder(getContext())
-                            .asBottomList("请选择查看方式", new String[]{"网页形式（流畅性能）", "原生界面（格式规整）"}, (position, text) -> {
-                                switch (text) {
-                                    case "网页形式（流畅性能）":
-                                        addWindow("view-source:" + url, true, webViewT);
-                                        break;
-                                    case "原生界面（格式规整）":
-                                        showCode(url, webViewT.getUaNonNull());
-                                        break;
-                                }
-                            }).show();
                     break;
                 case "设置":
                 case "更多设置":
@@ -1327,7 +1495,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     PreferenceMgr.put(getContext(), "custom", "noWebHistory", SettingConfig.noWebHistory);
                     ToastMgr.shortCenter(getContext(), "已关闭无痕模式");
                     break;
-                case "下载管理":
+                case "下载":
                     Intent intent2 = new Intent(getContext(), DownloadRecordsActivity.class);
                     intent2.putExtra("downloaded", true);
                     startActivity(intent2);
@@ -1337,7 +1505,10 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     finish();
                     break;
             }
-        });
+        }).withGreasyForkMenu(jsCount);
+        if (webViewT == null) {
+            return;
+        }
         String url = webViewT.getUrl();
         HeavyTaskUtil.executeNewTask(() -> {
             List<Bookmark> bookmarks = null;
@@ -1354,6 +1525,41 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 });
             }
         });
+    }
+
+    private void showGreasyForkMenu() {
+        List<String> greasyForkRules = webViewT.getWebViewHelper().getGreasyForkRules();
+        List<String> data = new ArrayList<>();
+        Map<Integer, String> map = new HashMap<>();
+        for (int i = 0; i < greasyForkRules.size(); i++) {
+            String rule = greasyForkRules.get(i);
+            data.add(rule);
+            List<String> menu = webViewT.getWebViewHelper().getGreasyForkMenus(rule);
+            if (CollectionUtil.isNotEmpty(menu)) {
+                for (int j = 0; j < menu.size(); j++) {
+                    if ("管理插件".equals(menu.get(j))) {
+                        continue;
+                    }
+                    data.add("    " + menu.get(j));
+                    map.put(data.size() - 1, rule);
+                }
+            }
+        }
+        data.add("管理所有插件");
+        new XPopup.Builder(getContext())
+                .asBottomList(null, CollectionUtil.toStrArray(data), null, data.size(), (position, text) -> {
+                    if ("管理所有插件".equals(text)) {
+                        startActivity(new Intent(getContext(), JSListActivity.class));
+                    } else if (text.startsWith("    ")) {
+                        text = text.substring(4);
+                        String rule = map.get(position);
+                        webViewT.getWebViewHelper().triggerGreasyForkMenu(rule, text);
+                    } else {
+                        Intent intent = new Intent(getContext(), JSListActivity.class);
+                        intent.putExtra("search", text);
+                        startActivity(intent);
+                    }
+                }).show();
     }
 
     private void showCode(String url, String userAgent) {
@@ -1383,9 +1589,13 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
      * 初始化可以后台初始化的配置
      */
     private void initBackgroundTaskNotImportant() {
+        boolean memoryPlaySpeed = PreferenceMgr.getBoolean(getContext(), SETTING_CONFIG, "memoryPlaySpeed", true);
+        if (memoryPlaySpeed) {
+            VideoPlayerManager.PLAY_SPEED = PreferenceMgr.getFloat(getContext(), "ijkplayer", "playSpeed", 1f);
+        }
         RemotePlayConfig.playerPath = RemotePlayConfig.D_PLAYER_PATH;
         try {
-            DownloadManager.instance().loadConfig();
+            DownloadManager.instance();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -1406,6 +1616,16 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         }
         try {
             WebDavBackupUtil.autoSave(getContext());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            AboutOfficer.INSTANCE.autoCheckUpdate(getActivity());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            AutoCacheUtilKt.clearCache(getContext());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -1470,9 +1690,11 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             String data = getIntent().getDataString();
             if (StringUtil.isNotEmpty(data)) {
                 checkIntentUrl(data);
+                getIntent().setData(null);
             } else {
                 String url = getIntent().getStringExtra("url");
                 checkIntentUrl(url);
+                getIntent().removeExtra("url");
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -1485,6 +1707,15 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
 
     private void checkIntentUrl(String url) {
         if (StringUtil.isNotEmpty(url)) {
+            String url2;
+            String fName;
+            if (url.startsWith("content://")) {
+                fName = UriUtils.getFileName(Uri.parse(url));
+                url2 = url + "#name=" + fName;
+            } else {
+                url2 = url;
+                fName = FileUtil.getFileName(url);
+            }
             if (url.equals("hiker://search") || url.equals("hiker://webSearch")) {
                 GlobalSearchPopup.startSearch(WebViewActivity.this, null
                         , getNowUrl(), "web", getResources().getColor(R.color.white), true);
@@ -1495,9 +1726,16 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 if (s.length > 1) {
                     GlobalSearchPopup.startSearch(WebViewActivity.this, null, s[1], "web", getResources().getColor(R.color.white), true);
                 }
-            } else if (!url.startsWith("http") && url.endsWith(".apk.1")) {
+            } else if (url.startsWith("magnet") || url.startsWith("ed2k") || url.startsWith("ftp")) {
+                ThunderManager.INSTANCE.globalInit(getContext());
+                if (ThunderManager.INSTANCE.isFTPOrEd2k(url)) {
+                    ThunderManager.INSTANCE.startParseFTPOrEd2k(getContext(), url);
+                } else {
+                    ThunderManager.INSTANCE.startDownloadMagnet(getContext(), url);
+                }
+            } else if (!url2.startsWith("http") && url2.endsWith(".apk.1")) {
                 Uri uri = Uri.parse(url);
-                String fileName = UriUtils.getFileName(uri).replace(".apk.1", ".apk");
+                String fileName = fName.replace(".apk.1", ".apk");
                 String copyTo = DownloadDialogUtil.getApkDownloadPath(getContext()) + File.separator + fileName;
                 FileUtil.makeSureDirExist(copyTo);
                 UriUtils.getFilePathFromURI(getContext(), uri, copyTo, new UriUtils.LoadListener() {
@@ -1526,19 +1764,107 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     public void failed(String msg) {
                     }
                 });
-            } else if (UrlDetector.isVideoOrMusic(url) || url.startsWith("content://")) {
+            } else if (!url.startsWith("http") && url2.endsWith(".js")) {
+                Uri uri = Uri.parse(url);
+                String fileName = fName.replace(".js", "");
+                if (fileName.startsWith("global")) {
+                    String copyTo = UriUtils.getRootDir(getContext()) + File.separator + "cache" + File.separator + "_fileSelect_" + fName;
+                    FileUtil.makeSureDirExist(copyTo);
+                    UriUtils.getFilePathFromURI(getContext(), uri, copyTo, new UriUtils.LoadListener() {
+                        @Override
+                        public void success(String s) {
+                            ThreadTool.INSTANCE.runOnUI(() -> {
+                                new XPopup.Builder(getContext())
+                                        .asConfirm("温馨提示", "确定从外部导入“" + fileName + "”脚本插件？", () -> {
+                                            try {
+                                                FileUtil.copyFile(copyTo, JSManager.getJsDirPath() + File.separator + fileName + ".js");
+                                                JSManager.instance(getContext()).reloadJSFile(fileName);
+                                                ToastMgr.shortBottomCenter(getContext(), "导入成功");
+                                            } catch (IOException e) {
+                                                e.printStackTrace();
+                                            }
+                                        }).show();
+                            });
+                        }
+
+                        @Override
+                        public void failed(String msg) {
+                            ToastMgr.shortBottomCenter(getContext(), "出错：" + msg);
+                        }
+                    });
+                }
+            } else if (!url.startsWith("http") && url2.endsWith(".epub")) {
+                String copyTo = UriUtils.getRootDir(getContext()) + File.separator + "cache" + File.separator + "_fileSelect_" + fName;
+                FileUtil.makeSureDirExist(copyTo);
+                Uri uri = Uri.parse(url);
+                UriUtils.getFilePathFromURI(getContext(), uri, copyTo, new UriUtils.LoadListener() {
+                    @Override
+                    public void success(String s) {
+                        ThreadTool.INSTANCE.runOnUI(() -> {
+                            new XPopup.Builder(getContext())
+                                    .asConfirm("温馨提示", "确定阅读“" + fName + "”文件？注意点击确定按钮后文件会被放到我的下载里面，下次可直接在我的下载或者历史记录里面继续阅读", () -> {
+                                        String p = UriUtils.getRootDir(getContext()) + File.separator + "download" + File.separator + fName;
+                                        ThreadTool.INSTANCE.async(() -> {
+                                            try {
+                                                FileUtil.copyFile(copyTo, p);
+                                            } catch (IOException e) {
+                                                e.printStackTrace();
+                                            }
+                                        }, (e) -> {
+                                            if (e != null) {
+                                                ToastMgr.shortBottomCenter(getContext(), "出错：" + e.getMessage());
+                                            } else {
+                                                EpubFile.INSTANCE.showEpubView(getContext(), p);
+                                            }
+                                        });
+                                    }).show();
+                        });
+                    }
+
+                    @Override
+                    public void failed(String msg) {
+                        ToastMgr.shortBottomCenter(getContext(), "出错：" + msg);
+                    }
+                });
+            } else if (!url2.startsWith("http") && (url2.endsWith(".hiker") || url2.endsWith(".txt") || url2.endsWith(".json"))) {
+                if (url2.startsWith("content")) {
+                    String copyTo = UriUtils.getRootDir(getContext()) + File.separator + "_cache" + File.separator + fName;
+                    FileUtil.makeSureDirExist(copyTo);
+                    UriUtils.getFilePathFromURI(getContext(), Uri.parse(url), copyTo, new UriUtils.LoadListener() {
+                        @Override
+                        public void success(String s) {
+                            if (!isFinishing()) {
+                                String text = FileUtil.fileToString(s);
+                                runOnUiThread(() -> checkAutoTextFromFile(text, "file://" + s));
+                            }
+                        }
+
+                        @Override
+                        public void failed(String msg) {
+                        }
+                    });
+                } else {
+                    String path = url.replace("file://", "");
+                    if (!new File(path).exists()) {
+                        //中文文件名
+                        path = HttpParser.decodeUrl(path, "UTF-8");
+                    }
+                    String text = FileUtil.fileToString(path);
+                    checkAutoTextFromFile(text, url);
+                }
+            } else if (UrlDetector.isVideoOrMusic(url2) || url.startsWith("content://")) {
                 if (url.startsWith("content://")) {
                     Uri uri = Uri.parse(url);
-                    String copyTo = UriUtils.getRootDir(getContext()) + File.separator + "_cache" + File.separator + UriUtils.getFileName(uri);
+                    String copyTo = UriUtils.getRootDir(getContext()) + File.separator + "_cache" + File.separator + fName;
                     FileUtil.makeSureDirExist(copyTo);
-                    showLoading("文件解析中，请稍候");
+                    onLoading(new LoadingEvent("文件解析中，请稍候", true));
                     getIntent().putExtra("contentCache", true);
                     UriUtils.getFilePathFromURI(getContext(), uri, copyTo, new UriUtils.LoadListener() {
                         @Override
                         public void success(String s) {
                             if (!isFinishing()) {
                                 runOnUiThread(() -> {
-                                    hideLoading();
+                                    onLoading(new LoadingEvent("", false));
                                     String nUrl = "file://" + s;
                                     if (UrlDetector.isVideoOrMusic(s)) {
                                         PlayerChooser.startPlayer(getContext(), new File(s).getName(), nUrl);
@@ -1558,7 +1884,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                         @Override
                         public void failed(String msg) {
                             if (!isFinishing()) {
-                                runOnUiThread(() -> hideLoading());
+                                runOnUiThread(() -> onLoading(new LoadingEvent("", false)));
                             }
                         }
                     });
@@ -1578,12 +1904,22 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         }
     }
 
+    private void checkAutoTextFromFile(String text, String originalUrl) {
+        if (text.startsWith("{") && text.endsWith("}")) {
+            AutoImportHelper.importRulesByTextWithDialog(getContext(), text, originalUrl);
+        } else if (text.startsWith("[") && text.endsWith("]")) {
+            AutoImportHelper.importRulesByTextWithDialog(getContext(), text, originalUrl);
+        } else {
+            checkAutoText(text);
+        }
+    }
+
     private void setBottomMutiWindowIcon() {
         bottom_bar_muti.setImageDrawable(getResources().getDrawable(getMutiCountLineIconId()));
     }
 
     private int getMutiCountLineIconId() {
-        int size = MultiWindowManager.instance(this).getWebViewList().size();
+        int size = MultiWindowManager.instance(this).getUsedWebViewList().size();
         int id = R.drawable.discory_10;
         switch (size) {
             case 0:
@@ -1696,6 +2032,9 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         debug_node_text_bg = findView(R.id.debug_node_text_bg);
         View debug_save_btn = findView(R.id.debug_save_btn);
         View debug_edit_rule_btn = findView(R.id.debug_edit_rule_btn);
+        View debug_preview_btn = findView(R.id.debug_preview_btn);
+        View debug_reload_btn = findView(R.id.debug_reload_btn);
+        View debug_clear_btn = findView(R.id.debug_clear_btn);
         debug_node_text = findView(R.id.debug_node_text);
         debug_rule_text = findView(R.id.debug_rule_text);
 
@@ -1709,7 +2048,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
 
         //保存和编辑按钮
         debug_save_btn.setOnClickListener(v -> {
-            adBlockRule = debug_rule_text.getText().toString();
+            String adBlockRule = debug_rule_text.getText().toString();
             if (TextUtils.isEmpty(adBlockRule)) {
                 ToastMgr.shortBottomCenter(getContext(), "规则为空！");
             } else {
@@ -1717,19 +2056,75 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             }
         });
         debug_edit_rule_btn.setOnClickListener(v -> {
-            adBlockRule = debug_rule_text.getText().toString();
+            String adBlockRule = debug_rule_text.getText().toString();
             editBlockRule(adBlockRule);
+        });
+        debug_preview_btn.setOnClickListener(v -> {
+            String adBlockRule = debug_rule_text.getText().toString();
+            if (TextUtils.isEmpty(adBlockRule)) {
+                ToastMgr.shortBottomCenter(getContext(), "规则为空！");
+            } else {
+                String adBlockJs = AdBlockModel.getBlockJsByRule(adBlockRule);
+                if (!TextUtils.isEmpty(adBlockJs) && webViewT != null) {
+                    webViewT.evaluateJavascript(adBlockJs, null);
+                    ToastMgr.shortBottomCenter(getContext(), "已执行");
+                }
+            }
+        });
+        debug_reload_btn.setOnClickListener(v -> {
+            if (webViewT != null) {
+                webViewT.reload();
+            }
+        });
+        debug_clear_btn.setOnClickListener(v -> {
+            String url = webViewT == null ? null : webViewT.getUrl();
+            if (StringUtil.isEmpty(url)) {
+                ToastMgr.shortBottomCenter(getContext(), "网址为空");
+            } else {
+                String dom = StringUtil.getDom(url);
+                new XPopup.Builder(getContext())
+                        .asConfirm("温馨提示", "确定要清除" + dom + "下的元素拦截规则吗？注意清除后不能恢复，只能重新标记拦截", () -> {
+                            AdBlockRule rule = LitePal.where("dom = ?", dom).findFirst(AdBlockRule.class);
+                            AdBlockModel.deleteRule(rule);
+                            webViewT.reload();
+                            boolean has = AdUrlBlocker.instance().hasBlockRules(url);
+                            if (has) {
+                                new XPopup.Builder(getContext())
+                                        .asConfirm("温馨提示", "已清除本地拦截规则，但远程订阅的无法清除，可以在网站配置中禁用广告拦截，或者删除远程订阅", () -> {
+
+                                        }).show();
+                            } else {
+                                ToastMgr.shortBottomCenter(getContext(), "已清除");
+                            }
+                        }).show();
+            }
         });
     }
 
     private void editBlockRule(String rule) {
-        DialogBuilder.createInputConfirm(getContext(), "编辑拦截规则", rule, text -> {
+        InputConfirmPopup inputPopup = new InputConfirmPopup(getContext());
+        inputPopup.setDismissWhenConfirm(false);
+        inputPopup.setDismissWhenCancel(false);
+        inputPopup.bind("编辑拦截规则", "拦截规则", rule, (popup, text) -> {
             if (TextUtils.isEmpty(text)) {
                 ToastMgr.shortBottomCenter(getContext(), "规则不能为空");
             } else {
                 saveAdBlock(text);
+                popup.dismiss();
             }
-        }).show();
+        }).bindText("保存", "预览");
+        inputPopup.setCancelListener((popup, text) -> {
+            if (TextUtils.isEmpty(text)) {
+                ToastMgr.shortBottomCenter(getContext(), "规则不能为空");
+            } else {
+                String adBlockJs = AdBlockModel.getBlockJsByRule(text);
+                webViewT.evaluateJavascript(adBlockJs, null);
+                ToastMgr.shortCenter(getContext(), "已执行");
+            }
+        });
+        new XPopup.Builder(getContext())
+                .asCustom(inputPopup)
+                .show();
     }
 
     private void changeDebugView(String rule) {
@@ -1838,6 +2233,10 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void initBottomBarListener() {
+        boolean bottomHomeG = PreferenceMgr.getBoolean(getContext(), "bottomHomeG", true);
+        if (!bottomHomeG) {
+            return;
+        }
         bottomBar.setOnInterceptTouchEventListener(event -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 mDownY = event.getRawY();
@@ -1930,11 +2329,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         FrameLayout.LayoutParams leftLayoutParams = (FrameLayout.LayoutParams) leftIcon.getLayoutParams();
         FrameLayout.LayoutParams rightLayoutParams = (FrameLayout.LayoutParams) rightIcon.getLayoutParams();
         if (leftLayoutParams.leftMargin >= dp40) {
-            if (webViewT.canGoBack()) {
-                webViewT.goBack();
-            } else {
-                backToHomeHtml();
-            }
+            onBackPressed();
         } else if (rightLayoutParams.rightMargin >= dp40) {
             if (webViewT.canGoForward()) {
                 webViewT.goForward();
@@ -1975,6 +2370,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         AlertNewVersionUtil.alert(this);
         MiniProgramRouter.INSTANCE.loadConfigBackground(getContext());
         ScreenUtil.setDisplayInNotch(this);
+        DomainConfigService.INSTANCE.initConfigs();
     }
 
     private void showMenu(View view) {
@@ -2098,6 +2494,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (t.length() > 85) {
             t = t.substring(0, 85);
         }
+        videoUrl = PlayerChooser.decorateHeaderWithReferer(WebViewHelper.getRequestHeaderMap(webViewT, videoUrl), webViewT.getUrl(), videoUrl);
         DownloadDialogUtil.showEditDialog(this, t, videoUrl);
     }
 
@@ -2105,7 +2502,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (isForward(bottom_bar_refresh)) {
             return R.drawable.right;
         } else {
-            return R.drawable.refresh;
+            return R.drawable.refresh_web_6;
         }
     }
 
@@ -2156,7 +2553,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 backToHomeHtml();
                 break;
             case R.id.bottom_bar_muti:
-                showMutiWindowPop(v);
+                showMultiWindowPop(v);
                 break;
             case R.id.bottom_bar_title:
                 GlobalSearchPopup.startSearch(WebViewActivity.this, null
@@ -2191,7 +2588,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             if (webViewBg.getVisibility() != VISIBLE && webView.isUsed()) {
                 if (!"white".equals(webViewBg.getTag())) {
                     webViewBg.setTag("white");
-                    webViewBg.setBackgroundColor(Color.WHITE);
+                    webViewBg.setBackgroundColor(getBackgroundColor());
                 }
                 webViewBg.setAlpha(0f);
                 webViewBg.setVisibility(VISIBLE);
@@ -2200,55 +2597,84 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 shortcut_container.setVisibility(GONE);
                 shortcut_container.animate().alpha(0f).setDuration(300).start();
                 if (hasBackground()) {
-                    bottomBar.setBackground(getResources().getDrawable(R.drawable.shape_top_border));
-                    bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackgroundColor(getResources().getColor(R.color.gray_rice));
+                    updateBottomBarBackground(true);
                     AndroidBarUtils.setTranslucentStatusBar(this, false);
                 }
             }
         });
     }
 
-    private void showMutiWindowPop(View view) {
-        webViewT.setDetectedMediaResults(DetectorManager.getInstance().getDetectedMediaResults((Media) null));
-        int[] location = new int[2];
-        webViewBg.getLocationOnScreen(location);
-        int x = location[0];
-        int y = location[1];
-        View shortcut_container = findView(R.id.shortcut_container);
-        new XPopup.Builder(getContext())
-                .asCustom(new MutiWondowPopup(getContext())
-                        .home(shortcut_container)
-                        .with(WebViewActivity.this, MultiWindowManager.instance(WebViewActivity.this).getWebViewList(),
-                                () -> addWindow(null),
-                                () -> {
-                                    HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).clear();
-                                    showNewWebView(webView);
-                                    ToastMgr.shortBottomCenter(getContext(), "已清除所有窗口");
-                                    HeavyTaskUtil.saveTabHistory(getActivity());
-                                },
-                                new MutiWondowAdapter.OnClickListener() {
-                                    @Override
-                                    public void click(View view1, int pos) {
-                                        showWebViewByPos(pos);
-                                    }
-
-                                    @Override
-                                    public void remove(int pos) {
-                                        removeByPos(pos);
-                                        HeavyTaskUtil.saveTabHistory(getActivity());
-                                    }
-                                })).show();
+    private int getBackgroundColor() {
+        return WebViewHelper.getDefaultThemeColor(getContext());
     }
 
-    private void removeByPos(int pos) {
+    private void showMultiWindowPop(View view) {
+        showMultiWindowPop(() -> addWindow(null),
+                () -> {
+                    HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).clear();
+                    showNewWebView(webView);
+                    ToastMgr.shortBottomCenter(getContext(), "已清除所有窗口");
+                    HeavyTaskUtil.saveTabHistory(getActivity());
+                },
+                new MutiWondowAdapter.OnClickListener() {
+                    @Override
+                    public void click(View view1, int pos) {
+                        showWebViewByPos(pos);
+                    }
+
+                    @Override
+                    public void remove(int pos) {
+                        removeByPos(pos);
+                        HeavyTaskUtil.saveTabHistory(getActivity());
+                    }
+                });
+    }
+
+    private void showMultiWindowPop(Runnable addRunnable, Runnable clearRunnable, MutiWondowAdapter.OnClickListener clickListener) {
+        webViewT.setDetectedMediaResults(DetectorManager.getInstance().getDetectedMediaResults((Media) null));
+        View shortcut_container = findView(R.id.shortcut_container);
+        int tabStyle = PreferenceMgr.getInt(getContext(), "tabStyle", 0);
+        if (tabStyle == 0) {
+            new XPopup.Builder(getContext())
+                    .isLightStatusBar(true)
+                    .hasShadowBg(false)
+                    .asCustom(new MutiWondowPopup(getContext())
+                            .home(shortcut_container)
+                            .withClearOtherRunnable(this::clearOtherWebView)
+                            .with(WebViewActivity.this, MultiWindowManager.instance(WebViewActivity.this).getUsedWebViewList(),
+                                    addRunnable,
+                                    clearRunnable,
+                                    clickListener))
+                    .show();
+        } else {
+            new XPopup.Builder(getContext())
+                    .enableDrag(false)
+                    .asCustom(new MultiWondowTextPopup(getContext())
+                            .withClearOtherRunnable(this::clearOtherWebView)
+                            .with(WebViewActivity.this, MultiWindowManager.instance(WebViewActivity.this).getUsedWebViewList(),
+                                    addRunnable,
+                                    clearRunnable,
+                                    clickListener))
+                    .show();
+        }
+    }
+
+    private void removeByPos(int index) {
         webViewBg.removeView(webViewT);
-        HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).removeWebView(pos);
+        HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).removeWindow(index);
         showNewWebView(webView);
+    }
+
+    private void clearOtherWebView() {
+        MultiWindowManager.instance(WebViewActivity.this).clearOtherWebView();
+        HeavyTaskUtil.saveTabHistory(getActivity());
+        setBottomMutiWindowIcon();
+        ToastMgr.shortBottomCenter(getContext(), "已清除其它窗口");
     }
 
     private void showWebViewByPos(int pos) {
         webViewBg.removeView(webViewT);
-        webViewT = MultiWindowManager.instance(WebViewActivity.this).selectWebView(pos);
+        webViewT = MultiWindowManager.instance(WebViewActivity.this).selectWindow(pos);
         webViewBg.addView(webViewT);
         boolean backHome = StringUtil.isEmpty(webViewT.getUrl());
         if (backHome) {
@@ -2261,10 +2687,12 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             shortcut_container.setVisibility(GONE);
             shortcut_container.animate().alpha(0f).setDuration(300).start();
             if (hasBackground()) {
-                bottomBar.setBackground(getResources().getDrawable(R.drawable.shape_top_border));
-                bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackgroundColor(getResources().getColor(R.color.gray_rice));
                 AndroidBarUtils.setTranslucentStatusBar(getActivity(), false);
+                getWindow().setNavigationBarColor(0xffffffff);
             }
+            updateBottomBarBackground(true);
+        } else {
+            updateBottomBarBackground(true);
         }
         DetectorManager.getInstance().startDetect();
         if (!backHome) {
@@ -2296,10 +2724,12 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             shortcut_container.setVisibility(GONE);
             shortcut_container.animate().alpha(0f).setDuration(300).start();
             if (hasBackground()) {
-                bottomBar.setBackground(getResources().getDrawable(R.drawable.shape_top_border));
-                bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackgroundColor(getResources().getColor(R.color.gray_rice));
                 AndroidBarUtils.setTranslucentStatusBar(getActivity(), false);
+                getWindow().setNavigationBarColor(0xffffffff);
             }
+            updateBottomBarBackground(true);
+        } else {
+            updateBottomBarBackground(true);
         }
         webViewBg.addView(webViewT);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webViewT, true);
@@ -2347,15 +2777,18 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (isFinishing()) {
             return;
         }
-        webViewBg.removeView(webViewT);
+        webViewBg.removeViewWithAnimator(webViewT);
         webViewT = event.getWebView();
         webViewT.clearHistory();
         webViewBg.addView(webViewT);
         DetectorManager.getInstance().startDetect();
         refreshVideoCount();
         showSearchView(false);
-        setBottomMutiWindowIcon();
-        AnimateTogetherUtils.scaleNow(bottom_bar_muti);
+        if (webViewT.getParentWebView() == null) {
+            //不是通过返回不重载增加的WebView才更新窗口数和展示动画
+            setBottomMutiWindowIcon();
+            AnimateTogetherUtils.scaleNow(bottom_bar_muti);
+        }
     }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
@@ -2374,14 +2807,33 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         VideoTask video = new VideoTask(url, url);
         DetectorManager.getInstance().addTask(video);
         Timber.d("downloadStart: %s, %s, %s", url, event.getMimetype(), event.getContentDisposition());
-        String fileName = HttpManager.getDispositionFileName(event.getContentDisposition());
+        //先从header取
+        String fileName = DownloadManager.getDispositionFileName(event.getContentDisposition());
+        //再从链接名字取
+        if (StringUtil.isEmpty(fileName)) {
+            fileName = FileUtil.getResourceName(url);
+        }
+        //实在不行再根据md5生成
         if (StringUtil.isEmpty(fileName)) {
             fileName = StringUtil.md5(url);
-            if (UrlDetector.isMusic(url) || !UrlDetector.isVideoOrMusic(url)) {
-                String ext = ShareUtil.getExtension(event.getMimetype());
+        }
+        if (UrlDetector.isMusic(url) || !UrlDetector.isVideoOrMusic(url)) {
+            //非视频文件，补全后缀
+            if (!fileName.contains(".")) {
+                String ext = ShareUtil.getExtension(url, event.getMimetype());
                 if (StringUtil.isNotEmpty(ext)) {
                     fileName = fileName + "." + ext;
+                } else {
+                    String end = FileUtil.getExtension(url);
+                    if (StringUtil.isNotEmpty(end)) {
+                        fileName = fileName + "." + end;
+                    }
                 }
+            }
+        } else {
+            //视频文件，去掉后缀
+            if (fileName.lastIndexOf(".") >= 1) {
+                fileName = fileName.substring(0, fileName.lastIndexOf("."));
             }
         }
         String finalFileName = fileName;
@@ -2390,20 +2842,28 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             return;
         }
         Timber.d("downloadStart: finalFileName: %s", finalFileName);
-        String uu = PlayerChooser.decorateHeader(WebViewHelper.getRequestHeaderMap(webViewT, surl), webViewT.getUrl(), surl);
+        String uu = PlayerChooser.decorateHeaderWithReferer(WebViewHelper.getRequestHeaderMap(webViewT, surl), webViewT.getUrl(), surl);
+        if (DomainConfigKt.isDownloadNoConfirm(webViewT.getUrl())) {
+            DownloadDialogUtil.downloadNow(getActivity(), finalFileName, uu);
+            return;
+        }
         if (url.contains(".apk") || DownloadDialogUtil.isApk(fileName, event.getMimetype())) {
-            Snackbar.make(getSnackBarBg(), "是否允许网页中的下载请求？", Snackbar.LENGTH_LONG)
-                    .setAction("允许", v -> {
-                        FileUtil.saveFile(getContext(), () -> DownloadDialogUtil.showEditDialog(getActivity(), finalFileName, uu, event.getMimetype()));
-                    }).show();
+            if (DomainConfigKt.isDownloadStrongPrompt(webViewT.getUrl())) {
+                FileUtil.saveFile(getContext(), () -> DownloadDialogUtil.showEditDialog(getActivity(), finalFileName, uu, event.getMimetype(), event.getContentLength(), null));
+            } else {
+                Snackbar.make(getSnackBarBg(), "是否允许网页中的下载请求？", Snackbar.LENGTH_LONG)
+                        .setAction("允许", v -> {
+                            FileUtil.saveFile(getContext(), () -> DownloadDialogUtil.showEditDialog(getActivity(), finalFileName, uu, event.getMimetype(), event.getContentLength(), null));
+                        }).show();
+            }
         } else {
             new XPopup.Builder(getContext())
                     .asConfirm("温馨提示", "是否允许网页中的下载请求？（点击空白处拒绝操作，点击播放可以将链接作为视频地址直接播放）",
                             "播放", "下载", () -> {
                                 FileUtil.saveFile(getContext(), () -> {
-                                    DownloadDialogUtil.showEditDialog(getActivity(), finalFileName, uu, event.getMimetype());
+                                    DownloadDialogUtil.showEditDialog(getActivity(), finalFileName, uu, event.getMimetype(), event.getContentLength(), null);
                                 });
-                            }, () -> startPlayVideo(surl), false).show();
+                            }, () -> startPlayVideo(uu), false).show();
         }
     }
 
@@ -2418,29 +2878,48 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             ToastMgr.shortBottomCenter(getContext(), "获取文件格式失败");
             return;
         }
+        //告诉js，发起了下载请求，不要立即revokeObjectURL
+        webViewT.evaluateJavascript("window['blobDownload'] = 1;", null);
         if (StringUtil.isEmpty(fileName)) {
             fileName = StringUtil.md5(url);
         }
         if (!fileName.contains(".")) {
-            String ext = ShareUtil.getExtension(mimeType);
+            String ext = ShareUtil.getExtension(url, mimeType);
             if (StringUtil.isNotEmpty(ext)) {
                 fileName = fileName + "." + ext;
             }
         }
         String finalFileName = fileName;
+        if (DomainConfigKt.isDownloadNoConfirm(webViewT.getUrl())) {
+            new XPopup.Builder(getContext())
+                    .asInputConfirm("温馨提示", "以下为从网页下载请求中提取的文件名", finalFileName, "文件名", (text) -> {
+                        String name = text;
+                        if (StringUtil.isEmpty(text)) {
+                            name = finalFileName;
+                        }
+                        String finalName = name;
+                        FileUtil.saveFile(getContext(), () -> downloadBlob(url, finalName));
+                    }, null, R.layout.xpopup_confirm_input).show();
+            return;
+        }
         if (fileName.contains(".apk") || DownloadDialogUtil.isApk(fileName, mimeType)) {
-            Snackbar.make(getSnackBarBg(), "是否允许网页中的下载请求？", Snackbar.LENGTH_LONG)
-                    .setAction("允许", v -> {
-                        new XPopup.Builder(getContext())
-                                .asInputConfirm("温馨提示", "以下为从网页下载请求中提取的文件名", finalFileName, "文件名", (text) -> {
-                                    String name = text;
-                                    if (StringUtil.isEmpty(text)) {
-                                        name = finalFileName;
-                                    }
-                                    String finalName = name;
-                                    FileUtil.saveFile(getContext(), () -> downloadBlob(url, finalName));
-                                }, null, R.layout.xpopup_confirm_input).show();
-                    }).show();
+            Runnable runnable = () -> new XPopup.Builder(getContext())
+                    .asInputConfirm("温馨提示", "以下为从网页下载请求中提取的文件名", finalFileName, "文件名", (text) -> {
+                        String name = text;
+                        if (StringUtil.isEmpty(text)) {
+                            name = finalFileName;
+                        }
+                        String finalName = name;
+                        FileUtil.saveFile(getContext(), () -> downloadBlob(url, finalName));
+                    }, null, R.layout.xpopup_confirm_input).show();
+            if (DomainConfigKt.isDownloadStrongPrompt(webViewT.getUrl())) {
+                runnable.run();
+            } else {
+                Snackbar.make(getSnackBarBg(), "是否允许网页中的下载请求？", Snackbar.LENGTH_LONG)
+                        .setAction("允许", v -> {
+                            runnable.run();
+                        }).show();
+            }
         } else {
             new XPopup.Builder(getContext())
                     .asInputConfirm("温馨提示", "是否允许网页中的下载请求", finalFileName, "文件名", (text) -> {
@@ -2468,29 +2947,8 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
 
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void downloadBlobProgress(BlobDownloadProgressEvent event) {
-        if (loadingPopupView == null) {
-            loadingPopupView = new XPopup.Builder(getContext()).asLoading();
-        }
-        loadingPopupView.setTitle("下载中..." + event.getProgress());
-        if (!loadingPopupView.isShow()) {
-            loadingPopupView.show();
-        }
-    }
-
-    private void showLoading(String text) {
-        if (loadingPopupView == null) {
-            loadingPopupView = new XPopup.Builder(getContext()).asLoading();
-        }
-        loadingPopupView.setTitle(text);
-        if (!loadingPopupView.isShow()) {
-            loadingPopupView.show();
-        }
-    }
-
-    private void hideLoading() {
-        if (loadingPopupView != null) {
-            loadingPopupView.dismiss();
-        }
+        boolean isOk = "100/100".equals(event.getProgress());
+        onLoading(new LoadingEvent("下载中..." + event.getProgress(), !isOk));
     }
 
     @Subscribe
@@ -2504,7 +2962,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                 }
                 if (header.containsKey("content-type")) {
                     String mimeType = header.getString("content-type");
-                    String ext = ShareUtil.getExtension(mimeType);
+                    String ext = ShareUtil.getExtension(fileName, mimeType);
                     if (StringUtil.isNotEmpty(ext)) {
                         fileName = fileName + "." + ext;
                     }
@@ -2533,9 +2991,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             });
         });
         ThreadTool.INSTANCE.runOnUI(() -> {
-            if (loadingPopupView != null && loadingPopupView.isShow()) {
-                loadingPopupView.dismiss();
-            }
+            onLoading(new LoadingEvent("", false));
         });
     }
 
@@ -2730,6 +3186,8 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             FileUtil.deleteDirs(contentCache.getAbsolutePath());
         }
         SettingConfig.saveAdblockPlusCount(getContext());
+        MultiWindowManager.instance(this).releaseAllWebview();
+        JSEngine.getInstance().onDestroy();
         super.onDestroy();
     }
 
@@ -2789,6 +3247,15 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             shortcutAdapter.notifyItemRangeChanged(0, shortcuts.size());
             BigTextDO.updateShortcuts(getContext(), Shortcut.toStr(shortcuts));
         } else if (webViewT != null && webViewT.canGoBack()) {
+            try {
+                WebBackForwardList list = webViewT.copyBackForwardList();
+                WebHistoryItem historyItem = list.getItemAtIndex(list.getCurrentIndex() - 1);
+                if (floatVideoController != null && StringUtil.isNotEmpty(historyItem.getUrl())) {
+                    floatVideoController.loadUrl(historyItem.getUrl());
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             webViewT.goBack();
         } else {
             if (webViewBg != null) {
@@ -2804,10 +3271,20 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     HorizontalWebView webView = MultiWindowManager.instance(WebViewActivity.this).removeWebView(pos);
                     showNewWebView(webView);
                     HeavyTaskUtil.saveTabHistory(getActivity());
+                    if (floatVideoController != null) {
+                        if (StringUtil.isNotEmpty(webViewT.getUrl())) {
+                            floatVideoController.loadUrl(webViewT.getUrl());
+                        } else {
+                            floatVideoController.destroy();
+                        }
+                    }
                     return;
                 }
                 if (webViewBg.getVisibility() == VISIBLE) {
                     backToHomeHtml();
+                    if (floatVideoController != null) {
+                        floatVideoController.destroy();
+                    }
                     return;
                 }
             }
@@ -2861,6 +3338,11 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     // true表示Light Mode，状态栏字体呈黑色，反之呈白色
                     wic.setAppearanceLightStatusBars(true);
                 }
+            }
+            updateNavBarColor(getHomeBackground());
+        } else {
+            if (PreferenceMgr.getBoolean(getContext(), "ib1", false)) {
+                updateBottomBarBackground();
             }
         }
         if (checkHomeIcon && bottomHomeIcon.getVisibility() == View.VISIBLE) {
@@ -3046,14 +3528,24 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             bottomBarXiuTanBg.setVisibility(VISIBLE);
         }
         bottomBarXiuTan.setText(videoEvent.getTitle());
+        if (DomainConfigKt.isDisableXiuTan(dom)) {
+            return;
+        }
         if (!hasDismissXiuTan) {
             hasDismissXiuTan = true;
             if (!hasAutoPlay) {
                 if (!DetectorManager.getInstance().inXiuTanDialogBlackList(webViewT.getUrl()) && !isToastShow) {
                     if (floatVideoController != null && !UrlDetector.isMusic(videoEvent.getMediaResult().getUrl())) {
+                        if (DomainConfigKt.isDisableFloatVideo(dom)) {
+                            return;
+                        }
                         videoEvent.getMediaResult().setClicked(true);
                         floatVideoController.show(videoEvent.getMediaResult().getUrl(), nowUrl, webViewT.getTitle(), true);
                     } else {
+                        if (!SettingConfig.xiuTanNotify) {
+                            //关闭了嗅探提示，那么快速播放也同时关闭
+                            return;
+                        }
                         showVideoToast();
                     }
                 }
@@ -3188,6 +3680,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         final EditText titleE = view1.findViewById(R.id.block_add_text);
         View block_add_dom = view1.findViewById(R.id.block_add_dom);
         View block_add_url = view1.findViewById(R.id.block_add_url);
+        View block_add_dom2 = view1.findViewById(R.id.block_add_dom2);
         View global = view1.findViewById(R.id.block_add_global);
         View domain = view1.findViewById(R.id.block_add_domain);
         String finalUrl = url;
@@ -3195,11 +3688,21 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             titleE.setText(StringUtil.getDom(finalUrl).split(":")[0]);
             block_add_url.setBackground(getDrawable(R.drawable.button_layer));
             block_add_dom.setBackground(getDrawable(R.drawable.button_layer_red));
+            block_add_dom2.setBackground(getDrawable(R.drawable.button_layer));
+        });
+        block_add_dom2.setOnClickListener(v -> {
+            String dom = StringUtil.getDom(finalUrl).split(":")[0];
+            String[] doms = dom.split("\\.");
+            titleE.setText(StringUtil.arrayToString(doms, Math.max(0, doms.length - 2), doms.length, "."));
+            block_add_url.setBackground(getDrawable(R.drawable.button_layer));
+            block_add_dom.setBackground(getDrawable(R.drawable.button_layer));
+            block_add_dom2.setBackground(getDrawable(R.drawable.button_layer_red));
         });
         block_add_url.setOnClickListener(v -> {
             titleE.setText(finalUrl);
             block_add_dom.setBackground(getDrawable(R.drawable.button_layer));
             block_add_url.setBackground(getDrawable(R.drawable.button_layer_red));
+            block_add_dom2.setBackground(getDrawable(R.drawable.button_layer));
         });
         global.setOnClickListener(v -> {
             titleE.setText(titleE.getText().toString().split("@domain=")[0]);
@@ -3225,7 +3728,11 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     } else {
                         AdUrlBlocker.instance().addUrl(title);
                         CleanMessageUtil.clearWebViewCache(getActivity());
-                        ToastMgr.shortBottomCenter(getContext(), "保存成功");
+                        if (!SettingConfig.shouldBlock()) {
+                            ToastMgr.shortBottomCenter(getContext(), "保存成功，但您关闭了广告拦截，因此不会生效");
+                        } else {
+                            ToastMgr.shortBottomCenter(getContext(), "保存成功");
+                        }
                         webViewT.postDelayed(() -> {
                             if (webViewT != null && !isFinishing()) {
                                 webViewT.reload();
@@ -3239,7 +3746,11 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         String blockJs = AdBlockModel.saveBlockRule(webViewT.getUrl(), rule);
         if (!TextUtils.isEmpty(blockJs)) {
             webViewT.evaluateJavascript(blockJs, null);
-            ToastMgr.shortBottomCenter(getContext(), "已保存拦截规则");
+            if (!SettingConfig.shouldBlock()) {
+                ToastMgr.shortBottomCenter(getContext(), "保存成功，但您关闭了广告拦截，因此不会生效");
+            } else {
+                ToastMgr.shortBottomCenter(getContext(), "已保存拦截规则");
+            }
         }
     }
 
@@ -3292,7 +3803,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         //识别二维码
         String uu = webViewT.getUrl();
         HeavyTaskUtil.executeNewTask(() -> {
-            File file = new PopImageLoaderNoView(uu).getImageFile(getContext(), url);
+            File file = new PopImageLoaderNoView(uu).getImageFile(getContext(), getImageUrl(url));
             if (file == null || !file.exists()) {
                 ToastMgr.shortBottomCenter(getContext(), "下载图片失败");
                 return;
@@ -3312,7 +3823,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void savePic(String url) {
-        ImgUtil.savePic2Gallery(getContext(), url, webViewT.getUrl(), new ImgUtil.OnSaveListener() {
+        ImgUtil.savePic2Gallery(getContext(), getImageUrl(url), webViewT.getUrl(), new ImgUtil.OnSaveListener() {
             @Override
             public void success(List<String> paths) {
                 runOnUiThread(() -> ToastMgr.shortBottomCenter(getContext(), "保存成功"));
@@ -3325,22 +3836,26 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         });
     }
 
+    private String getImageUrl(String url) {
+        return GlideUtil.getImageUrl(url, WebViewHelper.getRequestHeaderMap(webViewT, url));
+    }
+
     private void showBigPic(String pic) {
         List<DetectedMediaResult> images = DetectorManager.getInstance().getDetectedMediaResults(MediaType.IMAGE);
         List<Object> imageUrls = new ArrayList<>(images.size());
         int pos = -1;
         for (int i = 0; i < images.size(); i++) {
             DetectedMediaResult result1 = images.get(i);
-            imageUrls.add(result1.getUrl());
+            imageUrls.add(getImageUrl(result1.getUrl()));
             if (StringUtil.equalsDomUrl(pic, result1.getUrl())) {
                 pos = i;
             }
         }
         if (pos != -1) {
-            new XPopup.Builder(getContext()).asImageViewer(null, pos, imageUrls, null, new PopImageLoaderNoView(webViewT.getUrl()))
+            new MyXpopup().Builder(getContext()).asImageViewer(null, pos, imageUrls, null, new PopImageLoaderNoView(webViewT.getUrl()))
                     .show();
         } else {
-            new XPopup.Builder(getContext())
+            new MyXpopup().Builder(getContext())
                     .asImageViewer(null, pic, new PopImageLoaderNoView(webViewT.getUrl()))
                     .show();
         }
@@ -3566,7 +4081,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (customView == null) {
             return;
         }
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         boolean fullTheme = PreferenceMgr.getBoolean(getContext(), KEY_FULL_THEME, false);
         if (!fullTheme) {
             setStatusBarVisibility(true);
@@ -3703,7 +4218,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         runOnUiThread(() -> {
             try {
                 debug_rule_text.setText(event.getRule());
-                adBlockRule = debug_rule_text.getText().toString();
+                String adBlockRule = debug_rule_text.getText().toString();
                 if (TextUtils.isEmpty(adBlockRule)) {
                     ToastMgr.shortBottomCenter(getContext(), "获取拦截规则失败");
                 } else {
@@ -3817,6 +4332,9 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         hasDismissXiuTan = false;
         DetectorManager.getInstance().startDetect();
         hideMagnetIcon();
+        if (StringUtil.isNotEmpty(event.getUrl()) && event.getUrl().endsWith(".user.js")) {
+            JSUpdaterKt.loadGreasyJS(event.getUrl());
+        }
     }
 
 
@@ -3827,14 +4345,91 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (!TextUtils.isEmpty(event.getTitle())) {
             bottomTitleView.setText(event.getTitle());
         }
+        if (hasBackground()) {
+            getWindow().setNavigationBarColor(0xffffffff);
+        }
         finishPageNow(event.getUrl(), event.getTitle());
+        if (element_bg != null && element_bg.getVisibility() == VISIBLE) {
+            webViewT.evaluateJavascript("(function(){window.setDebugState(true)})();", null);
+        }
+    }
+
+    private void updateBottomBarBackground() {
+        updateBottomBarBackground(false);
+    }
+
+    private void updateBottomBarBackground(boolean revertFromWebView) {
+        boolean immerseBottom = PreferenceMgr.getBoolean(getContext(), "ib1", false);
+        if (immerseBottom) {
+            if (webViewBg != null && webViewBg.getVisibility() != VISIBLE) {
+                //主页
+                bottomBar.setBackground(null);
+                bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackground(null);
+            } else {
+                //显示WebView，不改变bottomBar，WebView页面加载完成时会自动识别修改
+                bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackground(null);
+                if (revertFromWebView && webViewT != null) {
+                    updateBottomBarBackground(webViewT.getNavigationBarColor());
+                }
+            }
+        } else {
+            bottomBar.setBackground(ContextCompat.getDrawable(getContext(), R.drawable.shape_top_border));
+            bottomBar.findViewById(R.id.bottom_bar_text_bg).setBackgroundColor(getResources().getColor(R.color.gray_rice));
+            getWindow().setNavigationBarColor(0xffffffff);
+        }
+    }
+
+    private void updateBottomBarBackground(int color) {
+        if (color == 0xff666666) {
+            color = 0xff343C3E;
+        }
+        if (color == 0xffffffff) {
+            color = 0xFFF7F7F7;
+        }
+        bottomBar.setBackgroundColor(color);
+        getWindow().setNavigationBarColor(color);
     }
 
     private void finishPageNow(String url, String title) {
+        refreshBottomBarAfterFinishPage();
         if (!SettingConfig.noWebHistory) {
             HeavyTaskUtil.saveHistory(getActivity(), CollectionTypeConstant.WEB_VIEW, "", url, title);
         }
         webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(getContext(), "magnet.js"), null);
+    }
+
+    /**
+     * 沉浸状态栏和底部地址栏
+     */
+    private void refreshBottomBarAfterFinishPage() {
+        if (webViewT != null) {
+            ThreadTool.INSTANCE.async(() -> {
+                try {
+                    //避免下次用时webViewT引用发生变化导致数据不对
+                    HorizontalWebView webView = webViewT;
+                    if (webView == null) {
+                        return;
+                    }
+                    boolean immerseBottom = PreferenceMgr.getBoolean(getContext(), "ib1", false);
+                    int[] colors = webView.loadAppBarColors(immerseBottom);
+                    ThreadTool.INSTANCE.runOnUI(() -> {
+                        if (webViewT == null) {
+                            return;
+                        }
+                        webView.setStatusBarColor(colors[0]);
+                        webView.setNavigationBarColor(colors[1]);
+                        if (webView.isUsed()) {
+                            StatusBarCompatUtil.setStatusBarColor(getActivity(), colors[0]);
+                            if (immerseBottom) {
+                                updateBottomBarBackground(colors[1]);
+                            }
+                        }
+                    });
+                } catch (Throwable e) {
+                    e.printStackTrace();
+                }
+            });
+        }
     }
 
     private void hideMagnetIcon() {
@@ -3972,14 +4567,6 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         }
     }
 
-
-    @Subscribe(threadMode = ThreadMode.MAIN)
-    public void onEvalJs(OnEvalJsEvent event) {
-        if (webViewT != null) {
-            webViewT.evaluateJavascript(event.getJs(), null);
-        }
-    }
-
     @Subscribe
     public void shouldOverrideUrlLoading2(OnOverrideUrlLoadingForOther event) {
         String url = event.getUrl();
@@ -3989,26 +4576,34 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (overrideUrlLoading2(event)) {
             return;
         }
-        if (SettingConfig.openAppNotify) {
-            appOpenTemp = false;
-            String dom = StringUtil.getDom(webViewT.getUrl());
-            if (WebViewHelper.disallowAppSet.contains(dom)) {
-                Timber.d("shouldOverrideUrlLoading2, disallowSet.contains: %s", url);
+        String dom = StringUtil.getDom(webViewT.getUrl());
+        int openAppMode = DomainConfigKt.getOpenAppMode(dom);
+        if (SettingConfig.openAppNotify || openAppMode != 0) {
+            if (openAppMode == 2) {
+                ShareUtil.findChooserToDeal(getContext(), url);
                 return;
+            }
+            appOpenTemp = false;
+            Integer disallowApp = WebViewHelper.disallowAppSet.get(dom);
+            if ((disallowApp != null && disallowApp > 1) || DomainConfigKt.isDisableOpenApp(dom)) {
+                if (openAppMode == 0) {
+                    Timber.d("shouldOverrideUrlLoading2, disallowSet.contains: %s", url);
+                    return;
+                }
             }
             Snackbar.make(getSnackBarBg(), "允许网页打开外部应用？", Snackbar.LENGTH_LONG)
                     .setAction("允许", v -> appOpenTemp = true).addCallback(new BaseTransientBottomBar.BaseCallback<Snackbar>() {
-                @Override
-                public void onDismissed(Snackbar transientBottomBar, int event) {
-                    Timber.d("shouldOverrideUrlLoading2, onDismissed: %s, %s", appOpenTemp, url);
-                    if (appOpenTemp) {
-                        ShareUtil.findChooserToDeal(getContext(), url);
-                    } else {
-                        WebViewHelper.disallowAppSet.add(dom);
-                    }
-                    super.onDismissed(transientBottomBar, event);
-                }
-            }).show();
+                        @Override
+                        public void onDismissed(Snackbar transientBottomBar, int event) {
+                            Timber.d("shouldOverrideUrlLoading2, onDismissed: %s, %s", appOpenTemp, url);
+                            if (appOpenTemp) {
+                                ShareUtil.findChooserToDeal(getContext(), url);
+                            } else {
+                                WebViewHelper.disallowAppSet.put(dom, disallowApp == null ? 1 : 2);
+                            }
+                            super.onDismissed(transientBottomBar, event);
+                        }
+                    }).show();
         }
     }
 
@@ -4018,12 +4613,24 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             String route = url.replace("hiker://", "");
             if (route.startsWith("mini-program@")) {
                 String name = route.replace("mini-program@", "");
+                if ("奇妙工具箱".equals(name)) {
+                    MiniProgramOfficer.INSTANCE.showTools(getActivity());
+                    return true;
+                }
                 RuleDTO ruleDTO = MiniProgramRouter.INSTANCE.findRuleDTO(name);
                 if (ruleDTO == null) {
                     ToastMgr.shortBottomCenter(getContext(), "找不到" + name + "小程序");
                 } else {
                     MiniProgramRouter.INSTANCE.startRuleHomePage(getContext(), ruleDTO);
                 }
+                return true;
+            } else if (route.startsWith("folder@")) {
+                String groupPath = route.replace("folder@", "");
+                BookmarkActivity.showBookmarks(getActivity(), groupPath, u -> {
+                    if (!isFinishing() && webViewT != null) {
+                        webViewT.loadUrl(u);
+                    }
+                });
                 return true;
             }
             switch (route) {
@@ -4089,42 +4696,53 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
 
     private void showSetting() {
         saveAdBlockPlusCount();
-        List<String> operations = new ArrayList<>(Arrays.asList("下载相关设置", "广告拦截订阅", "视频相关设置",
-                "UI界面自定义", "网页小程序", "搜索引擎管理", "自定义UA设置", "数据自动备份", "X5内核调试", "清除内部缓存", "关于与帮助"));
+        List<String> operations;
+        if (webViewT == null || StringUtil.isEmpty(webViewT.getUrl())) {
+            operations = new ArrayList<>(Arrays.asList("奇妙工具箱", "基本设置", "外观定制", "下载相关", "广告拦截", "播放器",
+                    "网页小程序", "搜索引擎管理", "自定义UA", "数据自动备份", "更多设置", "关于"));
+        } else {
+            operations = new ArrayList<>(Arrays.asList("奇妙工具箱", "基本设置", "外观定制", "下载相关", "广告拦截", "播放器",
+                    "网页小程序", "搜索引擎管理", "网站专属配置", "数据自动备份", "更多设置", "关于"));
+        }
         MoreSettingMenuPopup menuPopup = new MoreSettingMenuPopup(this, "更多设置", operations, text -> {
             switch (text) {
+                case "奇妙工具箱":
+                    MiniProgramOfficer.INSTANCE.showTools(getActivity());
+                    break;
+                case "基本设置":
+                    NormalSettingOfficer.INSTANCE.show(getActivity());
+                    break;
                 case "网页小程序":
                     MiniProgramOfficer.INSTANCE.show(getActivity());
                     break;
-                case "广告拦截订阅":
+                case "广告拦截":
                     AdblockOfficer.INSTANCE.show(getActivity());
                     break;
-                case "关于与帮助":
+                case "关于":
                     AboutOfficer.INSTANCE.show(getActivity());
                     break;
-                case "下载相关设置":
+                case "下载相关":
                     DownloadOfficer.INSTANCE.show(getActivity());
                     break;
-                case "X5内核调试":
-                    startActivity(new Intent(getContext(), X5DebugActivity.class));
-                    break;
-                case "视频相关设置":
+                case "播放器":
                     XiuTanOfficer.INSTANCE.show(getActivity());
                     break;
-                case "UI界面自定义":
+                case "外观定制":
                     showUI();
                     break;
                 case "搜索引擎管理":
                     startActivity(new Intent(getContext(), SearchEngineMagActivity.class));
                     break;
-                case "自定义UA设置":
+                case "网站专属配置":
+                    new XPopup.Builder(getContext())
+                            .asCustom(new DomainConfigPopup(getActivity(), StringUtil.getDom(webViewT.getUrl())))
+                            .show();
+                    break;
+                case "自定义UA":
                     startActivity(new Intent(getContext(), UAListActivity.class));
                     break;
-                case "清除内部缓存":
-                    String size = CleanMessageUtil.getTotalCacheSize(getContext());
-                    if (CleanMessageUtil.clearAllCache(getContext())) {
-                        ToastMgr.shortBottomCenter(getContext(), "已清除" + size + "的缓存");
-                    }
+                case "更多设置":
+                    MoreSettingOfficer.INSTANCE.show(getActivity());
                     break;
                 case "数据自动备份":
                     new XPopup.Builder(getContext())
@@ -4155,15 +4773,14 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             }
         }).popupHeight(0f);
         settingPopupView = new XPopup.Builder(getContext())
-                .moveUpToKeyboard(false)
                 .asCustom(menuPopup)
                 .show();
     }
 
     private void showSubMenuPopup() {
         new XPopup.Builder(getContext())
-                .asCustom(new BrowserSubMenuPopup(getActivity(), iconTitle -> {
-                    switch (iconTitle.getTitle()) {
+                .asCustom(new BrowserSubMenuPopup(getActivity(), tt -> {
+                    switch (tt) {
                         case "页内查找":
                             if (webViewBg.getVisibility() != VISIBLE) {
                                 ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
@@ -4171,19 +4788,65 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                             }
                             showSearchView(true);
                             break;
-                        case "网页翻译":
+                        case "翻译":
                             if (webViewBg.getVisibility() != VISIBLE) {
                                 ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
                                 break;
                             }
-                            if (webViewT.isUseTranslate()) {
-                                webViewT.setUseTranslate(false);
-                                webViewT.reload();
-                                ToastMgr.shortBottomCenter(getContext(), "已关闭网页翻译模式");
-                                break;
-                            }
-                            webViewT.setUseTranslate(true);
-                            webViewT.evaluateJavascript(JSManager.instance(getContext()).getTranslateJs(), null);
+                            webViewT.evaluateJavascript(MoreSettingOfficerKt.getTranslateJS(getContext()), null);
+                            break;
+                        case "更多功能":
+                            MoreSettingOfficer.INSTANCE.show(getActivity());
+                            break;
+                        case "护眼模式":
+                            CustomColorPopup popup = new CustomColorPopup(getContext());
+                            popup.setColorSelect(color -> {
+                                color = color.toUpperCase();
+                                if (color.length() == 9) {
+                                    color = color.replace("#FF", "#");
+                                }
+                                if ("#FFFFFF".equals(color)) {
+                                    PreferenceMgr.remove(getContext(), "eye");
+                                    for (HorizontalWebView webView : MultiWindowManager.instance(this).getWebViewList()) {
+                                        WebViewHelper.clearThemeCss(webView);
+                                    }
+                                    try {
+                                        //避免下次用时webViewT引用发生变化导致数据不对
+                                        HorizontalWebView webView = webViewT;
+                                        if (webView == null) {
+                                            return;
+                                        }
+                                        if (StringUtil.isNotEmpty(webViewT.getUrl())) {
+                                            webViewBg.setBackgroundColor(Color.WHITE);
+                                        }
+                                        if (webView.isUsed()) {
+                                            webView.reload();
+                                        }
+                                    } catch (Throwable e) {
+                                        e.printStackTrace();
+                                    }
+                                } else {
+                                    PreferenceMgr.put(getContext(), "eye", color);
+                                    int color1 = Color.parseColor(color);
+                                    for (HorizontalWebView webView : MultiWindowManager.instance(this).getWebViewList()) {
+                                        WebViewHelper.clearThemeCss(webView);
+                                        WebViewHelper.injectThemeCss(webView);
+                                        webView.setStatusBarColor(color1);
+                                        webView.setNavigationBarColor(color1);
+                                        if (webView.isUsed()) {
+                                            StatusBarCompatUtil.setStatusBarColor(getActivity(), color1);
+                                            updateBottomBarBackground(color1);
+                                        }
+                                    }
+                                    if (StringUtil.isNotEmpty(webViewT.getUrl())) {
+                                        webViewBg.setBackgroundColor(color1);
+                                    }
+//                                    ToastMgr.shortBottomCenter(getContext(), "建议同时在UI界面自定义中开启强制新窗口打开");
+                                }
+                            });
+                            new XPopup.Builder(getContext())
+                                    .asCustom(popup)
+                                    .show();
                             break;
                         case "开发调试":
                             if (webViewBg.getVisibility() != VISIBLE) {
@@ -4198,7 +4861,9 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                             }
                             webViewT.setUseDevMode(true);
                             ToastMgr.shortBottomCenter(getContext(), "已开启开发调试模式");
-                            webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(getContext(), "vConsole.js"), null);
+                            webViewT.evaluateJavascript(FilesInAppUtil.getAssetsString(getContext(), "vConsole.js"), value -> {
+                                webViewT.evaluateJavascript("eruda.show()", null);
+                            });
                             break;
                         case "保存网页":
                             if (webViewBg.getVisibility() != VISIBLE) {
@@ -4231,8 +4896,27 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                             intent2.putExtra("offline_pages", true);
                             startActivity(intent2);
                             break;
-                        case "全屏模式":
-                            toggleFullTheme();
+                        case "查看源码":
+                            if (webViewBg.getVisibility() != VISIBLE) {
+                                ToastMgr.shortBottomCenter(getContext(), "当前页面不支持此功能");
+                                break;
+                            }
+                            if (StringUtil.isEmpty(webViewT.getUrl())) {
+                                ToastMgr.shortBottomCenter(getContext(), "页面链接为空");
+                                break;
+                            }
+                            String url = webViewT.getUrl().startsWith("view-source:") ? webViewT.getUrl().replace("view-source:", "") : webViewT.getUrl();
+                            new XPopup.Builder(getContext())
+                                    .asBottomList("请选择查看方式", new String[]{"网页形式（流畅性能）", "原生界面（格式规整）"}, (position, text) -> {
+                                        switch (text) {
+                                            case "网页形式（流畅性能）":
+                                                addWindow("view-source:" + url, true, webViewT);
+                                                break;
+                                            case "原生界面（格式规整）":
+                                                showCode(url, webViewT.getUaNonNull());
+                                                break;
+                                        }
+                                    }).show();
                             break;
                     }
                 })).show();
@@ -4246,8 +4930,12 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void updateFullTheme(boolean fullTheme) {
-        View view_game_close = findView(R.id.view_game_close);
-        view_game_close.setVisibility(fullTheme ? VISIBLE : GONE);
+        IconFloatButton view_game_close = findView(R.id.view_game_close);
+        if (fullTheme) {
+            view_game_close.show();
+        } else {
+            view_game_close.hide();
+        }
         int dp50 = DisplayUtil.dpToPx(getContext(), 50);
         if (fullTheme) {
             bottomBar.setVisibility(GONE);
@@ -4288,6 +4976,7 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
             setStatusBarVisibilityFullTheme(true);
             if (webViewT != null && StringUtil.isNotEmpty(webViewT.getUrl())) {
                 StatusBarCompatUtil.setStatusBarColor(getActivity(), webViewT.getStatusBarColor());
+                updateBottomBarBackground(true);
             } else {
                 StatusBarCompatUtil.setStatusBarColor(WebViewActivity.this, getResources().getColor(R.color.white));
                 if (hasBackground()) {
@@ -4314,16 +5003,46 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     }
 
     private void showUI() {
-        List<String> operations = new ArrayList<>(Arrays.asList("主页背景设置", "主页图标颜色", "主页壁纸管理", "主页随机壁纸", "底部导航定制", "手势前进后退", "网页打开应用", "网页获取位置", "网页字体大小", "历史记录限制",
-                "启动时恢复标签", "强制新窗口打开", "跟随系统深色模式", "清除主页背景", "恢复主页配置"));
+        List<String> operations = new ArrayList<>(Arrays.asList("主页背景设置", "主页图标颜色", "主页壁纸管理", "主页随机壁纸", "底部导航定制", "底部地址栏沉浸", "标签栏样式设置",
+                "底部上滑手势", "手势前进后退", "网页字体大小", "清除主页背景", "恢复主页配置"));
         SettingMenuPopup menuPopup = new SettingMenuPopup(this, "UI界面自定义", operations, text -> {
             switch (text) {
-                case "强制新窗口打开":
-                    boolean forceNewWindow = PreferenceMgr.getBoolean(getContext(), "forceNewWindow", false);
+                case "标签栏样式设置":
+                    int tabStyle = PreferenceMgr.getInt(getContext(), "tabStyle", 0);
                     new XPopup.Builder(getContext())
-                            .asBottomList("强制新窗口打开网页", new String[]{"关闭", "开启"}, null, forceNewWindow ? 1 : 0, (position, t) -> {
-                                PreferenceMgr.put(getContext(), "forceNewWindow", position == 1);
-                                ToastMgr.shortCenter(getContext(), "已" + t + "强制新窗口打开网页");
+                            .asCenterList("标签栏样式设置", new String[]{"图文样式", "文字样式"}, null, tabStyle, (position, t) -> {
+                                PreferenceMgr.put(getContext(), "tabStyle", position);
+                                ToastMgr.shortCenter(getContext(), "已设置为" + t);
+                            }).show();
+                    break;
+                case "底部上滑手势":
+                    boolean bottomHomeG = PreferenceMgr.getBoolean(getContext(), "bottomHomeG", true);
+                    new XPopup.Builder(getContext())
+                            .asCenterList("底部上滑回主页手势", new String[]{"开启", "关闭"}, null, bottomHomeG ? 0 : 1, (position, t) -> {
+                                PreferenceMgr.put(getContext(), "bottomHomeG", position == 0);
+                                ToastMgr.shortCenter(getContext(), "已" + t + "底部上滑回主页手势");
+                                if (position == 0) {
+                                    //开启
+                                    initBottomBarListener();
+                                } else {
+                                    bottomBar.setOnTouchEventListener(null);
+                                }
+                            }).show();
+                    break;
+                case "底部地址栏沉浸":
+                    boolean immerseBottom = PreferenceMgr.getBoolean(getContext(), "ib1", false);
+                    new XPopup.Builder(getContext())
+                            .asCenterList("底部导航地址栏沉浸", new String[]{"关闭", "开启"}, null, immerseBottom ? 1 : 0, (position, t) -> {
+                                if (position == 1) {
+                                    PreferenceMgr.put(getContext(), "ib1", true);
+                                    if (webViewT != null && StringUtil.isNotEmpty(webViewT.getUrl())) {
+                                        refreshBottomBarAfterFinishPage();
+                                    }
+                                } else {
+                                    PreferenceMgr.remove(getContext(), "ib1");
+                                    updateBottomBarBackground();
+                                }
+                                ToastMgr.shortCenter(getContext(), "已" + t + "地址栏沉浸");
                             }).show();
                     break;
                 case "手势前进后退":
@@ -4361,27 +5080,6 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                                         }
                                     }).show();
                     break;
-                case "网页打开应用":
-                    new PromptDialog(getContext())
-                            .setTitleText("网页打开应用提示设置")
-                            .setSpannedContentByStr("是否允许提示打开外部应用，默认同一网页允许提示打开对应应用，同一个网页同一时刻只能提醒三次（避免流氓网站一直提示），使用不再提示后有网页想要打开外部应用也不再提示")
-                            .setPositiveListener(SettingConfig.openAppNotify ? "不再提示" : "允许提示", dialog -> {
-                                dialog.dismiss();
-                                SettingConfig.setOpenAppNotify(getContext(), !SettingConfig.openAppNotify);
-                                ToastMgr.shortBottomCenter(getContext(), "已设置为" + (SettingConfig.openAppNotify ? "允许提示" : "不再提示"));
-                            }).show();
-                    break;
-                case "网页获取位置":
-                    new XPopup.Builder(getContext())
-                            .asConfirm("网页获取位置设置", "是否允许网页获取位置信息？", "不允许", "允许", () -> {
-                                SettingConfig.setOpenGeoNotify(getContext(), true);
-                                ToastMgr.shortBottomCenter(getContext(), "已设置为允许");
-                            }, () -> {
-                                SettingConfig.setOpenGeoNotify(getContext(), false);
-                                ToastMgr.shortBottomCenter(getContext(), "已设置为不允许");
-                            }, false)
-                            .show();
-                    break;
                 case "恢复主页配置":
                     getDefaultShortcuts();
                     BigTextDO.updateShortcuts(getContext(), Shortcut.toStr(shortcuts));
@@ -4406,69 +5104,6 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
                     break;
                 case "清除主页背景":
                     clearBackground();
-                    break;
-                case "历史记录限制":
-                    int historyCount = PreferenceMgr.getInt(Application.getContext(), "historyCount", 300);
-                    String[] titles = new String[]{"不记录历史", "保留100条", "保留300条", "保留500条", "保留1000条"};
-                    int select = 2;
-                    if (historyCount == 0) {
-                        select = 0;
-                    } else if (historyCount == 100) {
-                        select = 1;
-                    } else if (historyCount == 300) {
-                        select = 2;
-                    } else if (historyCount == 500) {
-                        select = 3;
-                    } else if (historyCount == 1000) {
-                        select = 4;
-                    }
-                    new XPopup.Builder(getContext())
-                            .asBottomList("历史记录限制", titles, null, select, (position, t) -> {
-                                int count = 300;
-                                if (position == 0) {
-                                    count = 0;
-                                } else if (position == 1) {
-                                    count = 100;
-                                } else if (position == 2) {
-                                    count = 300;
-                                } else if (position == 3) {
-                                    count = 500;
-                                } else if (position == 4) {
-                                    count = 1000;
-                                }
-                                PreferenceMgr.put(Application.getContext(), "historyCount", count);
-                                if (count < historyCount) {
-                                    ToastMgr.shortCenter(getContext(), "已设置为" + t);
-                                } else {
-                                    ToastMgr.shortCenter(getContext(), "已设置为" + t + "，旧的数据需要手动删除");
-                                }
-                            }).show();
-                    break;
-                case "启动时恢复标签":
-                    int recoverLastTab = PreferenceMgr.getInt(getContext(), "vip", "recoverLastTab", 0);
-                    new XPopup.Builder(getContext())
-                            .asBottomList("启动时恢复未关闭标签", new String[]{"不恢复", "手动恢复", "自动恢复"}, null, recoverLastTab, (position, t) -> {
-                                PreferenceMgr.put(getContext(), "vip", "recoverLastTab", position);
-                                ToastMgr.shortCenter(getContext(), "已设置为" + t);
-                            }).show();
-                    break;
-                case "跟随系统深色模式":
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                        ToastMgr.shortBottomCenter(getContext(), "当前系统版本不支持深色模式");
-                        break;
-                    }
-                    boolean forceDark = PreferenceMgr.getBoolean(getContext(), "forceDark", true);
-                    new XPopup.Builder(getContext())
-                            .asBottomList("跟随系统深色模式", new String[]{"跟随系统（默认推荐）", "禁用（无法完全禁用，不推荐）"},
-                                    null, forceDark ? 0 : 1, ((p, t) -> {
-                                        boolean force = p == 0;
-                                        PreferenceMgr.put(getContext(), "forceDark", force);
-                                        new XPopup.Builder(getContext())
-                                                .asConfirm("温馨提示", "设置成功，需要重启软件才能生效，是否立即重启？", () -> {
-                                                    android.os.Process.killProcess(android.os.Process.myPid());
-                                                    System.exit(0);
-                                                }).show();
-                                    })).show();
                     break;
             }
         }).dismissWhenClick(true);
@@ -4545,38 +5180,45 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
         if (webViewBg == null) {
             return;
         }
-        ClipboardUtil.getText(getContext(), webViewBg, text -> {
-            if (TextUtils.isEmpty(text)) {
-                return;
-            }
-            String shareText = text.trim();
-//            Log.d(TAG, "checkClipboard: " + shareText.substring(0, 4));
-            if (shareText.length() > 6 && "海阔视界".equals(shareText.substring(1, 5))) {
-                shareText = shareText.substring(1);
-            } else if (shareText.length() > 7 && "嗅觉浏览器".equals(shareText.substring(1, 6))) {
-                shareText = shareText.substring(1);
-            }
-            if (!TextUtils.isEmpty(shareText) && shareText.startsWith("http") && !shareText.equals(detectedUrl) && !shareText.equals(AutoImportHelper.getShareRule())) {
-                detectedUrl = shareText;
-                detectedText = shareText;
-                AutoImportHelper.checkText(WebViewActivity.this, shareText);
-            }
-            if (!TextUtils.isEmpty(shareText) && (shareText.startsWith("海阔视界") || shareText.startsWith("方圆") || shareText.startsWith("嗅觉浏览器")) && !shareText.equals(AutoImportHelper.getShareRule())) {
-//                Log.d(TAG, "checkClipboard: true");
-                if (detectedText.equals(shareText)) {
-                    return;
-                } else {
-                    detectedUrl = shareText;
-                    detectedText = shareText;
-                }
-                try {
-                    AutoImportHelper.checkAutoText(getContext(), shareText);
-                } catch (Exception ignored) {
-                }
-            }
-        });
+        ClipboardUtil.getText(getContext(), webViewBg, text -> checkAutoText(text));
     }
 
+    private void checkAutoText(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return;
+        }
+        String shareText = text.trim();
+        if (!detectedText.equals(shareText) && AutoImportHelper.couldCloudImport(getContext(), shareText)) {
+            detectedText = shareText;
+            return;
+        }
+//            Log.d(TAG, "checkClipboard: " + shareText.substring(0, 4));
+        if (shareText.length() > 6 && "海阔视界".equals(shareText.substring(1, 5))) {
+            shareText = shareText.substring(1);
+        } else if (shareText.length() > 7 && "嗅觉浏览器".equals(shareText.substring(1, 6))) {
+            shareText = shareText.substring(1);
+        }
+        if (!TextUtils.isEmpty(shareText) && shareText.startsWith("http") && !shareText.equals(detectedUrl) && !shareText.equals(AutoImportHelper.getShareRule())) {
+            detectedUrl = shareText;
+            detectedText = shareText;
+            AutoImportHelper.checkText(WebViewActivity.this, shareText);
+        }
+        if (!TextUtils.isEmpty(shareText) && (shareText.startsWith("海阔视界") || shareText.startsWith("方圆") || shareText.startsWith("嗅觉浏览器")) && !shareText.equals(AutoImportHelper.getShareRule())) {
+//                Log.d(TAG, "checkClipboard: true");
+            if (detectedText.equals(shareText)) {
+                return;
+            } else {
+                detectedUrl = shareText;
+                detectedText = shareText;
+            }
+            try {
+                AutoImportHelper.checkAutoText(getContext(), shareText);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @SuppressLint("WrongConstant")
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         try {
@@ -4610,5 +5252,87 @@ public class WebViewActivity extends BaseWebViewActivity implements View.OnClick
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void hi(BackMainEvent event) {
         startActivity(new Intent(getContext(), EmptyActivity.class));
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onLoading(LoadingEvent event) {
+        if (event.isShow()) {
+            if (isOnPause) {
+                return;
+            }
+            if (globalLoadingView != null && globalLoadingView.isShow()) {
+                globalLoadingView.setTitle(event.getText());
+                return;
+            }
+            globalLoadingView = new XPopup.Builder(getContext())
+                    .asLoading(event.getText());
+            globalLoadingView.show();
+        } else if (globalLoadingView != null) {
+            globalLoadingView.dismiss();
+            globalLoadingView = null;
+        }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onJSUpdate(UpdateEvent event) {
+        if (jsUpdateEvents == null) {
+            jsUpdateEvents = new ArrayList<>();
+        }
+        if (jsUpdateEvents.isEmpty()) {
+            jsUpdateEvents.add(event);
+            webViewBg.postDelayed(() -> {
+                List<UpdateEvent> events = new ArrayList<>(jsUpdateEvents);
+                jsUpdateEvents.clear();
+                if (!events.isEmpty()) {
+                    try {
+                        String t = "““检测到有" + events.size() + "个插件更新””";
+                        Activity ctx = ActivityManager.getInstance().getCurrentActivity();
+                        CustomBottomPopup popup = new CustomBottomPopup(ctx, t)
+                                .addOnClickListener(v -> {
+                                    Activity c = ActivityManager.getInstance().getCurrentActivity();
+                                    new XPopup.Builder(c)
+                                            .asCustom(new JSUpdatePopup(c).withTitle("脚本插件更新").with(events))
+                                            .show();
+                                });
+                        new XPopup.Builder(ctx)
+                                .hasShadowBg(false)
+                                .asCustom(popup)
+                                .show();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }, event.getUrgent() ? 500 : 5000);
+        } else {
+            jsUpdateEvents.add(event);
+        }
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onAuthRequest(AuthBridgeEvent event) {
+        if (isFinishing()) {
+            return;
+        }
+        Context context = ActivityManager.getInstance().getCurrentActivity();
+        AlertDialog alertDialog = new AlertDialog.Builder(context)
+                .setTitle("授权提示")
+                .setMessage(event.getRule() + "申请" + event.getTitle() + "，此方法非常规情况下不需要使用，确认要使用请点击授权执行")
+                .setCancelable(false)
+                .setPositiveButton("授权执行", (dialog, which) -> {
+                    dialog.dismiss();
+                    JSEngine.getInstance().updateAuth(event.getRule(), event.getMethod(), AuthBridgeEvent.AuthResult.AGREE);
+                    event.getLock().countDown();
+                })
+                .setNegativeButton("拒绝执行", (dialog, which) -> {
+                    dialog.dismiss();
+                    JSEngine.getInstance().updateAuth(event.getRule(), event.getMethod(), AuthBridgeEvent.AuthResult.DISAGREE);
+                    event.getLock().countDown();
+                })
+                .setNeutralButton("暂不授权", ((dialog, which) -> {
+                    dialog.dismiss();
+                    event.getLock().countDown();
+                }))
+                .create();
+        DialogUtil.INSTANCE.showAsCard(context, alertDialog);
     }
 }

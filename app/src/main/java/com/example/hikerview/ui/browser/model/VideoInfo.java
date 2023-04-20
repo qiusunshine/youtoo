@@ -1,5 +1,7 @@
 package com.example.hikerview.ui.browser.model;
 
+import com.example.hikerview.ui.download.VideoFormat;
+
 import java.util.Objects;
 
 /**

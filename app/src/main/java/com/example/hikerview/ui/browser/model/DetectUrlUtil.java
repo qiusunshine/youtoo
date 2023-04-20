@@ -2,9 +2,9 @@ package com.example.hikerview.ui.browser.model;
 
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.browser.util.HttpRequestUtil;
-import com.example.hikerview.ui.browser.util.M3U8Util;
 import com.example.hikerview.ui.browser.util.UUIDUtil;
-import com.example.hikerview.ui.browser.util.VideoFormatUtil;
+import com.example.hikerview.ui.download.VideoFormat;
+import com.example.hikerview.ui.download.util.VideoFormatUtil;
 import com.example.hikerview.utils.StringUtil;
 
 import java.io.IOException;
@@ -26,10 +26,15 @@ public class DetectUrlUtil {
 
     public static String getNeedCheckUrl(String url) {
         url = url.replace("http://", "").replace("https://", "");
+        if (!url.contains("/")) {
+            return url;
+        }
         String[] urls = url.split("/");
         if (urls.length > 1) {
             //去掉域名
             return StringUtil.listToString(Arrays.asList(urls), 1, "/");
+        } else if (urls.length < 1) {
+            return url;
         } else if ((urls[0] + "/").equals(url)) {
             return "";
         }
@@ -54,25 +59,37 @@ public class DetectUrlUtil {
             //检测失败，未找到Content-Type
             return null;
         }
-        VideoFormat videoFormat = VideoFormatUtil.detectVideoFormat(url, headerMap.get("Content-Type"));
+        VideoFormat videoFormat = VideoFormatUtil.detectVideoFormat(null, url, map);
         if (videoFormat == null) {
             //检测成功，不是视频
             return null;
         }
-        VideoInfo videoInfo = new VideoInfo();
-        if ("player/m3u8".equals(videoFormat.getName())) {
-            double duration = M3U8Util.figureM3U8Duration(url);
-            if (duration <= 0) {
-                //检测成功，不是m3u8的视频
+        if (VideoFormatUtil.isStreamContent(headerMap.get("Content-Type"))) {
+            //浏览器里面嗅探严格一点
+            String[] check = new String[]{".mp4", ".m3u8", ".mp3", ".mkv", ".flv", ".avi", ".rmvb"};
+            boolean has = false;
+            for (String s : check) {
+                if (url.contains(s)) {
+                    has = true;
+                    break;
+                }
+            }
+            if (!has) {
                 return null;
             }
+        }
+        VideoInfo videoInfo = new VideoInfo();
+        if ("player/m3u8".equals(videoFormat.getName())) {
             videoInfo.setDetectImageType("m3u8");
-            videoInfo.setDuration(duration);
         } else {
             long size = 0;
             if (headerMap.containsKey("Content-Length")) {
                 try {
-                    size = Long.parseLong(headerMap.get("Content-Length"));
+                    String len = headerMap.get("Content-Length");
+                    if (len.startsWith("[")) {
+                        len = len.replace("[", "").replace("]", "");
+                    }
+                    size = Long.parseLong(len);
                 } catch (NumberFormatException e) {
                     e.printStackTrace();
                 }

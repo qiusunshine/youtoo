@@ -2,26 +2,14 @@ package com.example.hikerview.ui.browser.view;
 
 import android.app.Activity;
 import android.content.Context;
-import android.view.View;
 
 import androidx.annotation.NonNull;
-import androidx.recyclerview.widget.GridLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
-import com.alibaba.fastjson.JSON;
 import com.example.hikerview.R;
-import com.example.hikerview.constants.ArticleColTypeEnum;
-import com.example.hikerview.ui.browser.data.CardCol4Data;
-import com.example.hikerview.ui.browser.data.CardMultiData;
-import com.example.hikerview.ui.browser.model.IconTitle;
-import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.setting.model.SettingConfig;
-import com.example.hikerview.ui.view.popup.MenuViewAdapter;
-import com.lxj.xpopup.core.BasePopupView;
+import com.example.hikerview.ui.view.DrawableTextView;
+import com.example.hikerview.utils.PreferenceMgr;
 import com.lxj.xpopup.core.BottomPopupView;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 作者：By 15968
@@ -30,11 +18,9 @@ import java.util.List;
  */
 public class BrowserMenuPopup extends BottomPopupView {
 
-    private Activity activity;
-    private RecyclerView recyclerView;
-    private List<IconTitle> iconTitles;
     private OnItemClickListener onItemClickListener;
-    private MenuViewAdapter adapter;
+    private int greasyForkJsCount;
+    private DrawableTextView menuBookmarkAdd, menuPure, menuImageMode;
 
     public BrowserMenuPopup(@NonNull Context context) {
         super(context);
@@ -42,8 +28,12 @@ public class BrowserMenuPopup extends BottomPopupView {
 
     public BrowserMenuPopup(@NonNull Activity activity, OnItemClickListener onItemClickListener) {
         super(activity);
-        this.activity = activity;
         this.onItemClickListener = onItemClickListener;
+    }
+
+    public BrowserMenuPopup withGreasyForkMenu(int greasyForkJsCount) {
+        this.greasyForkJsCount = greasyForkJsCount;
+        return this;
     }
 
     // 返回自定义弹窗的布局
@@ -56,138 +46,83 @@ public class BrowserMenuPopup extends BottomPopupView {
     @Override
     protected void onCreate() {
         super.onCreate();
+        DrawableTextView menuBookmark = findViewById(R.id.menuBookmark);
+        bindItemClickListener(menuBookmark);
+        menuBookmarkAdd = findViewById(R.id.menuBookmarkAdd);
+        bindItemClickListener(menuBookmarkAdd);
+        DrawableTextView menuHistory = findViewById(R.id.menuHistory);
+        bindItemClickListener(menuHistory);
+        DrawableTextView menuDownload = findViewById(R.id.menuDownload);
+        bindItemClickListener(menuDownload);
+        DrawableTextView menuPlugin = findViewById(R.id.menuPlugin);
+        if (greasyForkJsCount > 0) {
+            menuPlugin.setText("插件(" + greasyForkJsCount + ")");
+        } else {
+            menuPlugin.setText("插件");
+        }
+        bindItemClickListener(menuPlugin);
+        DrawableTextView menuXiuTan = findViewById(R.id.menuXiuTan);
+        bindItemClickListener(menuXiuTan);
+        DrawableTextView menuUa = findViewById(R.id.menuUa);
+        bindItemClickListener(menuUa);
+        DrawableTextView menuUrls = findViewById(R.id.menuUrls);
+        bindItemClickListener(menuUrls);
+        DrawableTextView menuRefresh = findViewById(R.id.menuRefresh);
+        bindItemClickListener(menuRefresh);
+        DrawableTextView menuTools = findViewById(R.id.menuTools);
+        bindItemClickListener(menuTools);
+        menuImageMode = findViewById(R.id.menuImageMode);
+        bindItemClickListener(menuImageMode);
+        menuPure = findViewById(R.id.menuPure);
+        bindItemClickListener(menuPure);
+        DrawableTextView menuFullscreen = findViewById(R.id.menuFullscreen);
+        bindItemClickListener(menuFullscreen);
+        DrawableTextView menuMarkAd = findViewById(R.id.menuMarkAd);
+        bindItemClickListener(menuMarkAd);
+        DrawableTextView menuConfig = findViewById(R.id.menuConfig);
+        bindItemClickListener(menuConfig);
 
-        recyclerView = findViewById(R.id.recyclerView);
-        iconTitles = new ArrayList<>();
-        IconTitle iconTitle = new IconTitle(R.drawable.account_home, "书签", "查看、编辑、管理书签", ArticleColTypeEnum.CARD_MULTI);
-        CardMultiData cardMultiData = new CardMultiData("加入书签", R.drawable.icon_browser_bookmark, "历史记录", R.drawable.icon_browser_history);
-        iconTitle.setExtraParam(JSON.toJSONString(cardMultiData));
-        iconTitle.setExtraConsumer(op -> {
-            dismissWith(() -> {
-                if (onItemClickListener != null) {
-                    onItemClickListener.onClick(new IconTitle(op, null));
-                }
-            });
-        });
-        iconTitles.add(iconTitle);
-
-
-        IconTitle iconTitle2 = new IconTitle(-1, null, null, ArticleColTypeEnum.CARD_COL_4);
-        List<CardCol4Data> data1 = new ArrayList<>();
-
-        data1.add(new CardCol4Data("网络日志", R.drawable.icon_his));
-        data1.add(new CardCol4Data("查看源码", R.drawable.icon_code));
-        data1.add(new CardCol4Data("视频嗅探", R.drawable.icon_xiutan));
-        data1.add(new CardCol4Data("工具箱", R.drawable.icon_box));
-
-        iconTitle2.setExtraParam(JSON.toJSONString(data1));
-        iconTitle2.setExtraConsumer(op -> {
-            dismissWith(() -> {
-                if (onItemClickListener != null) {
-                    onItemClickListener.onClick(new IconTitle(op, null));
-                }
-            });
-        });
-        iconTitles.add(iconTitle2);
-
-
-        IconTitle iconTitle1 = new IconTitle(-1, null, null, ArticleColTypeEnum.CARD_COL_4_2);
-        List<CardCol4Data> data = new ArrayList<>();
-
-        data.add(new CardCol4Data("设置UA", R.drawable.icon_ua));
-        data.add(new CardCol4Data("分享链接", R.drawable.icon_share_green));
-        data.add(new CardCol4Data("插件管理", R.drawable.icon_plugin));
-        data.add(new CardCol4Data("下载管理", R.drawable.icon_download));
-        data.add(new CardCol4Data("无图模式", R.drawable.icon_filter));
-        data.add(new CardCol4Data(SettingConfig.noWebHistory ? "关闭无痕" : "无痕模式", R.drawable.icon_pure));
-        data.add(new CardCol4Data("退出软件", R.drawable.icon_exit));
-        data.add(new CardCol4Data("更多设置", R.drawable.icon_setting));
-
-        iconTitle1.setExtraParam(JSON.toJSONString(data));
-        iconTitle1.setExtraConsumer(op -> {
-            dismissWith(() -> {
-                if (onItemClickListener != null) {
-                    onItemClickListener.onClick(new IconTitle(op, null));
-                }
-            });
-        });
-        iconTitles.add(iconTitle1);
-
-
-        iconTitles.add(new IconTitle(null, ArticleColTypeEnum.BIG_BLANK_BLOCK));
-        iconTitles.add(new IconTitle(null, ArticleColTypeEnum.BIG_BLANK_BLOCK));
-
-        GridLayoutManager gridLayoutManager = new GridLayoutManager(getContext(), 60);
-        gridLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
-            @Override
-            public int getSpanSize(int position) {
-                if (adapter == null) {
-                    return 60;
-                }
-                if (recyclerView.getAdapter() != adapter) {
-                    return 60;
-                }
-                return ArticleColTypeEnum.getSpanCountByItemType(adapter.getItemViewType(position));
-            }
-        });
-        recyclerView.setLayoutManager(gridLayoutManager);
-        adapter = new MenuViewAdapter(activity, iconTitles, new MenuViewAdapter.OnItemClickListener() {
-            @Override
-            public void onClick(View view, int position) {
-                dismissWith(() -> {
-                    if (onItemClickListener != null) {
-                        onItemClickListener.onClick(iconTitles.get(position));
-                    }
-                });
-            }
-
-            @Override
-            public void onLongClick(View view, int position) {
+        findViewById(R.id.menuExit).setOnClickListener(v -> {
+            if (onItemClickListener != null) {
+                onItemClickListener.onClick("退出");
                 dismiss();
             }
         });
-        recyclerView.setAdapter(adapter);
-        recyclerView.addItemDecoration(adapter.getDividerItem());
+        findViewById(R.id.menuSetting).setOnClickListener(v -> {
+            if (onItemClickListener != null) {
+                onItemClickListener.onClick("设置");
+                dismiss();
+            }
+        });
+        findViewById(R.id.menuFold).setOnClickListener(v -> dismiss());
+
+        if (menuPure != null) {
+            menuPure.setText(SettingConfig.noWebHistory ? "关闭无痕" : "无痕模式");
+        }
+        if (menuImageMode != null) {
+            boolean blockImg = PreferenceMgr.getBoolean(getContext(), "blockImg", false);
+            menuImageMode.setText(blockImg ? "关闭无图" : "无图模式");
+        }
     }
 
-    @Override
-    public BasePopupView show() {
-        if (CollectionUtil.isNotEmpty(iconTitles) && adapter != null) {
-            for (int i = 0; i < iconTitles.size(); i++) {
-                IconTitle iconTitle = iconTitles.get(i);
-                if ("无痕模式".equals(iconTitle.getTitle()) || "关闭无痕".equals(iconTitle.getTitle())) {
-                    if (SettingConfig.noWebHistory && "无痕模式".equals(iconTitle.getTitle())) {
-                        iconTitle.setTitle("关闭无痕");
-                        adapter.notifyItemChanged(i);
-                    } else if (!SettingConfig.noWebHistory && "关闭无痕".equals(iconTitle.getTitle())) {
-                        iconTitle.setTitle("无痕模式");
-                        adapter.notifyItemChanged(i);
-                    }
-                    break;
-                }
+    private void bindItemClickListener(DrawableTextView view) {
+        view.setOnClickListener(v -> {
+            if (onItemClickListener != null && v instanceof DrawableTextView) {
+                DrawableTextView drawableTextView = (DrawableTextView) v;
+                String t = drawableTextView.getTextView().getText().toString();
+                onItemClickListener.onClick(t);
+                dismiss();
             }
-        }
-        return super.show();
+        });
     }
 
     public interface OnItemClickListener {
-        void onClick(IconTitle iconTitle);
+        void onClick(String text);
     }
 
     public void notifyInBookmarkItem() {
-        if (CollectionUtil.isEmpty(iconTitles)) {
-            return;
+        if (menuBookmarkAdd != null) {
+            menuBookmarkAdd.setText("移除书签");
         }
-        IconTitle iconTitle = iconTitles.get(0);
-        CardMultiData cardMultiData = new CardMultiData("移除书签", R.drawable.icon_browser_bookmark, "历史记录", R.drawable.icon_browser_history);
-        iconTitle.setExtraParam(JSON.toJSONString(cardMultiData));
-        iconTitle.setExtraConsumer(op -> {
-            dismissWith(() -> {
-                if (onItemClickListener != null) {
-                    onItemClickListener.onClick(new IconTitle(op, null));
-                }
-            });
-        });
-        adapter.notifyItemChanged(0);
     }
 }

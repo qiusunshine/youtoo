@@ -41,4 +41,6 @@ public interface WebViewWrapper {
     Map<String, Map<String, String>> getRequestHeaderMap();
 
     String getCookie(String url);
+
+    void openThirdApp(String scheme);
 }

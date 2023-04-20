@@ -30,7 +30,27 @@ public class MultiWindowManager {
     private volatile static MultiWindowManager sInstance;
 
     public List<HorizontalWebView> getWebViewList() {
+        Timber.d("MultiWindowManager: getWebViewList: %s", webViewList.size());
         return webViewList;
+    }
+
+    public List<HorizontalWebView> getUsedWebViewList() {
+        Timber.d("MultiWindowManager: getWebViewList: %s", webViewList.size());
+        List<HorizontalWebView> list = new ArrayList<>();
+        for (HorizontalWebView webView : webViewList) {
+            boolean isParent = false;
+            for (HorizontalWebView check : webViewList) {
+                if (webView == check.getParentWebView()) {
+                    isParent = true;
+                    break;
+                }
+            }
+            //不是任何一个WebView的父组件说明才是在用的
+            if (!isParent) {
+                list.add(webView);
+            }
+        }
+        return list;
     }
 
     private List<HorizontalWebView> webViewList = new ArrayList<>();
@@ -56,6 +76,17 @@ public class MultiWindowManager {
         if (activity instanceof BaseWebViewActivity) {
             InternalContext.getInstance().setBaseContext(activity);
             sInstance.activity = (BaseWebViewActivity) activity;
+        }
+        return sInstance;
+    }
+
+    public static MultiWindowManager instance() {
+        if (sInstance == null) {
+            synchronized (MultiWindowManager.class) {
+                if (sInstance == null) {
+                    sInstance = new MultiWindowManager();
+                }
+            }
         }
         return sInstance;
     }
@@ -115,10 +146,14 @@ public class MultiWindowManager {
     public HorizontalWebView addWebView(String url, boolean showNow, @Nullable WebView fromWho) {
         if (showNow) {
             for (HorizontalWebView horizontalWebView : webViewList) {
-                horizontalWebView.setUsed(false);
-                unbindBaseProperties(horizontalWebView);
-                horizontalWebView.stopLoading();
-                horizontalWebView.onPause();
+                try {
+                    horizontalWebView.setUsed(false);
+                    unbindBaseProperties(horizontalWebView);
+                    horizontalWebView.stopLoading();
+                    horizontalWebView.onPause();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         }
         HorizontalWebView webView = new HorizontalWebView(InternalContext.getInstance().getMutableContext());
@@ -138,6 +173,42 @@ public class MultiWindowManager {
             webViewList.add(webView);
         }
         return webView;
+    }
+
+    /**
+     * 开启页面缓存，干掉老的父WebView，降低性能消耗
+     *
+     * @param webView
+     */
+    public void checkTooManyParents(HorizontalWebView webView) {
+        HorizontalWebView parentView = webView.getParentWebView();
+        int count = 0;
+        HorizontalWebView last = parentView, survive = null;
+        while (parentView != null) {
+            count++;
+            survive = last;
+            last = parentView;
+            parentView = parentView.getParentWebView();
+        }
+        if (count >= 5) {
+            //有5个及以上，干掉最后一个
+            List<String> parentUrls = last.getParentUrls();
+            if (parentUrls == null) {
+                parentUrls = new ArrayList<>();
+            }
+            parentUrls.add(last.getUrl());
+            try {
+                unbindBaseProperties(last);
+                last.stopLoading();
+                last.onPause();
+                last.destroy();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            webViewList.remove(last);
+            survive.setParentWebView(null);
+            survive.setParentUrls(parentUrls);
+        }
     }
 
     /**
@@ -161,6 +232,7 @@ public class MultiWindowManager {
         webView.stopLoading();
         webView.onPause();
         unbindBaseProperties(webView);
+        HorizontalWebView parentView = webView.getParentWebView();
         ViewParent parent = webView.getParent();
         try {
             if (parent != null) {
@@ -176,26 +248,85 @@ public class MultiWindowManager {
         if (parent != null) {
             ((ViewGroup) parent).addView(webView);
         }
+        while (parentView != null) {
+            try {
+                unbindBaseProperties(parentView);
+                parentView.stopLoading();
+                parentView.onPause();
+                parentView.destroy();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            webViewList.remove(parentView);
+            parentView = parentView.getParentWebView();
+        }
         return webView;
     }
 
-    public HorizontalWebView selectWebView(int pos) {
+    public HorizontalWebView selectWindow(int index) {
+        List<HorizontalWebView> list = getUsedWebViewList();
+        HorizontalWebView webView = list.get(index);
+        int pos = webViewList.indexOf(webView);
         for (int i = 0; i < webViewList.size(); i++) {
-            if (pos == i) {
-                if (!webViewList.get(i).isUsed()) {
-                    webViewList.get(i).setUsed(true);
-                    initWebView(webViewList.get(i));
+            try {
+                if (pos == i) {
+                    if (!webViewList.get(i).isUsed()) {
+                        webViewList.get(i).setUsed(true);
+                        initWebView(webViewList.get(i));
+                    }
+                } else {
+                    if (webViewList.get(i).isUsed()) {
+                        webViewList.get(i).setUsed(false);
+                        unbindBaseProperties(webViewList.get(i));
+                        webViewList.get(i).stopLoading();
+                        webViewList.get(i).onPause();
+                    }
                 }
-            } else {
-                if (webViewList.get(i).isUsed()) {
-                    webViewList.get(i).setUsed(false);
-                    unbindBaseProperties(webViewList.get(i));
-                    webViewList.get(i).stopLoading();
-                    webViewList.get(i).onPause();
-                }
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
         return webViewList.get(pos);
+    }
+
+    private void destroyWebView(HorizontalWebView webView) {
+        unbindBaseProperties(webView);
+        webView.stopLoading();
+        webView.onPause();
+        webView.destroy();
+        HorizontalWebView parent = webView.getParentWebView();
+        while (parent != null) {
+            try {
+                unbindBaseProperties(parent);
+                parent.stopLoading();
+                parent.onPause();
+                parent.destroy();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            parent = parent.getParentWebView();
+        }
+    }
+
+    public void clearOtherWebView() {
+        HorizontalWebView current = null;
+        List<HorizontalWebView> list = getUsedWebViewList();
+        for (HorizontalWebView webView : list) {
+            if (webView.isUsed()) {
+                current = webView;
+            } else {
+                destroyWebView(webView);
+            }
+        }
+        webViewList.clear();
+        if (current != null) {
+            webViewList.add(current);
+            HorizontalWebView parent = current.getParentWebView();
+            while (parent != null) {
+                webViewList.add(0, parent);
+                parent = parent.getParentWebView();
+            }
+        }
     }
 
     /**
@@ -238,6 +369,82 @@ public class MultiWindowManager {
             }
         }
         return null;
+    }
+
+    public int removeByIndex(List<HorizontalWebView> list, int index) {
+        if (index < 0 || index >= list.size()) {
+            return 0;
+        }
+        HorizontalWebView webView = list.get(index);
+        HorizontalWebView parent = webView.getParentWebView();
+        int count = 1;
+        while (parent != null) {
+            webViewList.remove(parent);
+            try {
+                unbindBaseProperties(parent);
+                if (parent.getParent() != null) {
+                    ((ViewGroup) parent.getParent()).removeView(parent);
+                }
+                parent.stopLoading();
+                parent.onPause();
+                parent.destroy();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            count++;
+            parent = parent.getParentWebView();
+        }
+        webViewList.remove(webView);
+        try {
+            unbindBaseProperties(webView);
+            if (webView.getParent() != null) {
+                ((ViewGroup) webView.getParent()).removeView(webView);
+            }
+            webView.stopLoading();
+            webView.onPause();
+//            webView.pauseTimers();
+            webView.destroy();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return count;
+    }
+
+    public HorizontalWebView removeWindow(int index) {
+        List<HorizontalWebView> list = getUsedWebViewList();
+        if (index < 0 || index >= list.size()) {
+            ToastMgr.shortBottomCenter(activity, "移除窗口失败");
+            return null;
+        }
+        HorizontalWebView webView = list.get(index);
+//        int position = webViewList.indexOf(webView);
+        if (webView.isUsed()) {
+            //移除正在用的
+            int newIndex = index - 1;
+            if (index == 0) {
+                newIndex = index + 1;
+            }
+            if (newIndex < 0 || newIndex >= list.size()) {
+                //只剩一个窗口，不移除，加载首页
+                removeByIndex(list, index);
+                return addWebView(null);
+            } else {
+                //使用前一个webview，销毁当前的
+                Log.d(TAG, "removeWebView: use last, " + newIndex);
+                removeByIndex(list, index);
+                if (newIndex > index) {
+                    newIndex = newIndex - 1;
+                }
+                list.get(newIndex).setUsed(true);
+                initWebView(list.get(newIndex));
+                return list.get(newIndex);
+            }
+        } else {
+            //移除别的窗口，销毁那个webview
+            removeByIndex(list, index);
+            //返回正在使用的webview
+            return null;
+        }
     }
 
     public HorizontalWebView removeWebView(int position) {

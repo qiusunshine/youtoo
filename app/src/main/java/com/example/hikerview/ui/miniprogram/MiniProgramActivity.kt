@@ -12,13 +12,14 @@ import android.util.DisplayMetrics
 import android.view.*
 import android.widget.FrameLayout
 import androidx.appcompat.widget.Toolbar
+import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.gif.GifDrawable
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 import com.example.hikerview.R
-import com.example.hikerview.event.home.LoadingEvent
-import com.example.hikerview.event.home.SetPageTitleEvent
+import com.example.hikerview.event.home.*
+import com.example.hikerview.ui.Application
 import com.example.hikerview.ui.base.BaseActivity
 import com.example.hikerview.ui.browser.util.UUIDUtil
 import com.example.hikerview.ui.home.model.TextConfig
@@ -31,7 +32,9 @@ import com.example.hikerview.ui.miniprogram.service.HistoryMemoryService
 import com.example.hikerview.ui.setting.file.FileDetailAdapter
 import com.example.hikerview.ui.setting.file.FileDetailPopup
 import com.example.hikerview.ui.setting.model.SettingConfig
+import com.example.hikerview.ui.setting.office.MiniProgramOfficer
 import com.example.hikerview.utils.*
+import com.example.hikerview.utils.view.loadDominantColor
 import com.github.mmin18.widget.MyRealtimeBlurView
 import com.lxj.xpopup.XPopup
 import com.lxj.xpopup.impl.LoadingPopupView
@@ -71,12 +74,17 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
     private var parentData: AutoPageData? = null
     private var parentDataLoaded = false
     private var myMenu: Menu? = null
+    private var ruleServiceStarted = false
 
     override fun initLayout(savedInstanceState: Bundle?): Int {
         return R.layout.activity_mini_program
     }
 
     override fun initView() {
+        if (intent.getBooleanExtra("RuleForegroundService", false)) {
+            finish()
+            return
+        }
         if (!EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().register(this)
         }
@@ -92,6 +100,8 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                     ruleDTO?.rule?.contains("UA标识，mobile/pc/自定义") == true
                 ) {
                     myMenu?.findItem(R.id.about)?.title = "保存规则"
+                } else if (myMenu != null && (pageTitle == "奇妙工具箱")) {
+                    myMenu?.findItem(R.id.about)?.title = "加到主页"
                 }
             }
         }, 500)
@@ -101,7 +111,10 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
         toolbar_im_bg = findView(R.id.toolbar_im_bg)
         miniProgramFragment = MiniProgramFragment(ruleDTO!!, pageTitle)
         miniProgramFragment?.setReadTheme(isReadTheme())
-        miniProgramFragment?.setImmersiveTheme(isImmersiveTheme())
+        val immersiveOrFullTheme = isImmersiveTheme() || isFullTheme()
+        val requireBackground = isRequireBackgroundService()
+        miniProgramFragment?.setImmersiveTheme(immersiveOrFullTheme)
+        miniProgramFragment?.initAutoCache(pageTitle, ruleDTO?.url)
         miniProgramFragment?.setLoadListener(object : MiniProgramFragment.LoadListener {
             override fun complete() {
                 if (isImmersiveTheme()) {
@@ -115,8 +128,31 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                 }
             }
         })
+
+        if (isImmersiveTheme()) {
+            miniProgramFragment?.scrollListener = object : RecyclerView.OnScrollListener() {
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    super.onScrollStateChanged(recyclerView, newState)
+                    if (newState == RecyclerView.SCROLL_STATE_IDLE && toolbarHeight > 0) {
+                        //强行纠正overallXScroll，因为onScrolled里面的判断有时候不准确
+                        if (miniProgramFragment?.isAtTop() == true) {
+                            overallXScroll = 0
+                            adjustToolbarImBg()
+                        }
+                    }
+                }
+
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+                    if (toolbarHeight > 0) {
+                        overallXScroll = overallXScroll + dy // 累加y值 解决滑动一半y值为0
+                        adjustToolbarImBg()
+                    }
+                }
+            }
+        }
         ScreenUtil.setDisplayInNotch(this)
-        if (isImmersiveTheme() || isFullTheme()) {
+        if (immersiveOrFullTheme) {
             showImmersive()
         } else {
             val toolbar = findView<Toolbar>(R.id.toolbar)
@@ -129,6 +165,11 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
             .beginTransaction()
             .add(R.id.frame_bg, miniProgramFragment!!)
             .commit()
+        if (requireBackground) {
+            ruleServiceStarted = Application.application.startRuleForegroundService(
+                context
+            )
+        }
     }
 
     private fun changeToImmersive() {
@@ -143,10 +184,25 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                 GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
                     override fun onDoubleTap(e: MotionEvent): Boolean {
                         if (miniProgramFragment != null) {
-                            miniProgramFragment?.scrollTopSmooth()
-                            if (isImmersiveTheme()) {
-                                overallXScroll = 0
-                                adjustToolbarImBg()
+                            if (miniProgramFragment?.isAtTop() == true) {
+                                miniProgramFragment?.scrollBottomSmooth()
+                                if (isImmersiveTheme()) {
+                                    //overallXScroll无法得知，简单显示背景
+                                    overallXScroll = ScreenUtil.getScreenHeight2(activity)
+                                    if (hasX5InView()) {
+                                        homeBlur = false
+                                    }
+                                    toolbar_im_bg?.visibility = View.VISIBLE
+                                    toolbar_im_bg?.setBlurRadius(
+                                        if (homeBlur) toolbar_im_bg?.defRadius ?: 0F else 0F
+                                    )
+                                }
+                            } else {
+                                miniProgramFragment?.scrollTopSmooth()
+                                if (isImmersiveTheme()) {
+                                    overallXScroll = 0
+                                    adjustToolbarImBg()
+                                }
                             }
                         }
                         return super.onDoubleTap(e)
@@ -323,6 +379,8 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
             R.id.about ->
                 if (item.title == "保存规则") {
                     miniProgramFragment?.clickSaveRuleBtn()
+                } else if (item.title == "加到主页") {
+                    MiniProgramOfficer.addToShortcut(context, ruleDTO!!)
                 } else {
                     ToastMgr.shortBottomCenter(context, "还没写")
                 }
@@ -399,6 +457,7 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
     override fun onResume() {
         super.onResume()
         isOnPause = false
+        miniProgramFragment?.showLastClickItem()
     }
 
     override fun onPause() {
@@ -413,6 +472,9 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
         if (EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().unregister(this)
         }
+        if (ruleServiceStarted) {
+            Application.application.stopRuleForegroundService()
+        }
         super.onDestroy()
     }
 
@@ -424,13 +486,36 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
         if (event.title == null) {
             return
         }
-        val oldTitle = intent.getStringExtra("title")
         title = event.title
         //需要更新一下历史记录的标题
         intent.putExtra("title", event.title)
         HistoryMemoryService.updatePage(ruleDTO!!, pageTitle, event.title)
     }
 
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onSetPic(event: SetPagePicEvent) {
+        if (isOnPause || isFinishing) {
+            return
+        }
+        if (event.url == null) {
+            return
+        }
+        intent.putExtra("picUrl", event.url)
+        HistoryMemoryService.updatePic(ruleDTO!!, pageTitle, event.url)
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onSetParams(event: SetPageParamsEvent) {
+        if (isOnPause || isFinishing) {
+            return
+        }
+        if (event.params == null || ruleDTO == null || miniProgramFragment == null) {
+            return
+        }
+        ruleDTO?.params = event.params
+        miniProgramFragment?.updateParams(event.params)
+        HistoryMemoryService.updateParams(ruleDTO!!, pageTitle, event.params)
+    }
 
     @Subscribe(threadMode = ThreadMode.MAIN)
     fun onLoading(event: LoadingEvent) {
@@ -439,7 +524,8 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
         }
         if (event.isShow) {
             if (globalLoadingView != null && globalLoadingView?.isShow == true) {
-                globalLoadingView?.dismiss()
+                globalLoadingView!!.setTitle(event.text)
+                return
             }
             globalLoadingView = XPopup.Builder(context)
                 .asLoading(event.text)
@@ -500,6 +586,10 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                 && ruleDTO!!.url!!.contains("#fullTheme#")) || isReadTheme() || isGameTheme()
     }
 
+    private fun isRequireBackgroundService(): Boolean {
+        return (ruleDTO != null && StringUtil.isNotEmpty(ruleDTO!!.url)
+                && ruleDTO!!.url!!.contains("#background#"))
+    }
 
     private fun updateBg() {
         if (background!!.startsWith("/") || background!!.startsWith("file://") || background!!.startsWith(
@@ -537,9 +627,14 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                         findView<View>(R.id.viewBg).background = resource
                     }
                 })
+            loadDominantColor(context, background!!) {
+                window.navigationBarColor = it
+            }
             return
         }
-        findView<View>(R.id.viewBg).setBackgroundColor(Color.parseColor(background))
+        val color = Color.parseColor(background)
+        findView<View>(R.id.viewBg).setBackgroundColor(color)
+        window.navigationBarColor = color
     }
 
     fun refreshBackground(bg: String) {
@@ -574,7 +669,7 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if(requestCode == TEXT_CONFIG_IMG_CODE){
+        if (requestCode == TEXT_CONFIG_IMG_CODE) {
             if (resultCode == Activity.RESULT_OK) {
                 val uri = data!!.data
                 UriUtils.getFilePathFromURI(context, uri, object : UriUtils.LoadListener {
@@ -612,6 +707,28 @@ class MiniProgramActivity : BaseActivity(), ArticleListIsland {
                     }
                 })
             }
+        } else {
+            if (resultCode == RESULT_OK && data?.getBooleanExtra("refreshPage", false) == true) {
+                isOnPause = false
+                val scrollTop = data.getBooleanExtra("scrollTop", false)
+                EventBus.getDefault().post(OnRefreshPageEvent(scrollTop))
+                return
+            }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        return if (miniProgramFragment != null && miniProgramFragment?.onKeyDown(
+                keyCode,
+                event
+            ) == true
+        ) {
+            //被fragment消费了
+            true
+        } else super.onKeyDown(keyCode, event)
+    }
+
+    override fun finishWhenRestore(): Boolean {
+        return isReadTheme()
     }
 }

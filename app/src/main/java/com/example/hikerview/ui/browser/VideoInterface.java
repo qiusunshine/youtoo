@@ -9,15 +9,25 @@ import com.example.hikerview.event.home.OnRefreshX5HeightEvent;
 import com.example.hikerview.event.web.BlobDownloadEvent;
 import com.example.hikerview.event.web.BlobDownloadProgressEvent;
 import com.example.hikerview.event.web.FindMagnetsEvent;
+import com.example.hikerview.model.BigTextDO;
+import com.example.hikerview.service.http.CodeUtil;
 import com.example.hikerview.service.parser.JSEngine;
 import com.example.hikerview.ui.ActivityManager;
+import com.example.hikerview.ui.Application;
 import com.example.hikerview.ui.browser.model.DetailPage;
 import com.example.hikerview.ui.video.VideoChapter;
+import com.example.hikerview.ui.webdlan.LocalServerParser;
 import com.example.hikerview.utils.ClipboardUtil;
+import com.example.hikerview.utils.FileUtil;
+import com.example.hikerview.utils.HeavyTaskUtil;
 import com.example.hikerview.utils.StringUtil;
+import com.example.hikerview.utils.ThreadTool;
+import com.example.hikerview.utils.ToastMgr;
 
+import org.adblockplus.libadblockplus.android.Utils;
 import org.greenrobot.eventbus.EventBus;
 
+import java.io.File;
 import java.util.List;
 
 import timber.log.Timber;
@@ -165,6 +175,11 @@ public class VideoInterface {
     }
 
     @JavascriptInterface
+    public void translateBolan(String text) {
+        bridgeListener.translateBolan(text);
+    }
+
+    @JavascriptInterface
     public void copy(String text) {
         ClipboardUtil.copyToClipboardForce(ActivityManager.getInstance().getCurrentActivity(), text);
     }
@@ -215,7 +230,7 @@ public class VideoInterface {
     }
 
     @JavascriptInterface
-    public String isPc(){
+    public String isPc() {
         return bridgeListener.isPc();
     }
 
@@ -260,10 +275,10 @@ public class VideoInterface {
 
     @JavascriptInterface
     public void findMagnetsNotify(String data) {
-        if(StringUtil.isEmpty(data)){
+        if (StringUtil.isEmpty(data)) {
             return;
         }
-        if(data.startsWith("\"[{") && data.endsWith("}]\"")){
+        if (data.startsWith("\"[{") && data.endsWith("}]\"")) {
             data = data.substring(1, data.length() - 1).replace("\\\"", "\"");
         }
         EventBus.getDefault().post(new FindMagnetsEvent(data));
@@ -310,6 +325,11 @@ public class VideoInterface {
     }
 
     @JavascriptInterface
+    public String clearM3u8Ad(String url) {
+        return bridgeListener.clearM3u8Ad(url);
+    }
+
+    @JavascriptInterface
     public void showLoading(String str) {
         EventBus.getDefault().post(new LoadingEvent(str, true));
     }
@@ -317,6 +337,81 @@ public class VideoInterface {
     @JavascriptInterface
     public void hideLoading() {
         EventBus.getDefault().post(new LoadingEvent(null, false));
+    }
+
+    @JavascriptInterface
+    public void toast(String msg) {
+        ThreadTool.INSTANCE.runOnUI(() -> ToastMgr.shortBottomCenter(Application.getContext(), msg));
+    }
+
+    @JavascriptInterface
+    public String escapeJavaScriptString(String code) {
+        return Utils.escapeJavaScriptString(code);
+    }
+
+
+    @JavascriptInterface
+    public String md5(String code) {
+        return StringUtil.md5(code);
+    }
+
+    @JavascriptInterface
+    public String getItem(String rule, String key) {
+        return BigTextDO.getItem(rule, key);
+    }
+
+    @JavascriptInterface
+    public String listItems(String rule) {
+        return JSON.toJSONString(BigTextDO.listItems(rule));
+    }
+
+    @JavascriptInterface
+    public void setItem(String rule, String key, String value) {
+        BigTextDO.setItem(rule, key, value);
+    }
+
+    @JavascriptInterface
+    public void removeItem(String rule, String key) {
+        BigTextDO.removeItem(rule, key);
+    }
+
+    @JavascriptInterface
+    public void registerMenuCommand(String rule, String menu, String func) {
+        bridgeListener.registerMenuCommand(rule, menu, func);
+    }
+
+    @JavascriptInterface
+    public void unregisterMenuCommand(String rule, String menu) {
+        bridgeListener.unregisterMenuCommand(rule, menu);
+    }
+
+    @JavascriptInterface
+    public String getResourceUrl(String url) {
+        String fileName = "_fileSelect_" + StringUtil.md5(url) + "." + FileUtil.getExtension(url);
+        String path = JSEngine.getFilePath("hiker://files/cache/" + fileName);
+        try {
+            if (!new File(path).exists()) {
+                CodeUtil.downloadSync(url, path, null);
+            }
+            return LocalServerParser.getRealUrlForRemotedPlay(Application.getContext(), "file://" + path);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return url;
+        }
+    }
+
+    @JavascriptInterface
+    public void openThirdApp(String scheme) {
+        if (StringUtil.isNotEmpty(scheme)) {
+            bridgeListener.openThirdApp(scheme);
+        }
+    }
+
+    @JavascriptInterface
+    public void saveFormInputItem(String href, String id, String value) {
+        if (StringUtil.isNotEmpty(href) && StringUtil.isNotEmpty(id) && StringUtil.isNotEmpty(value)) {
+            HeavyTaskUtil.executeNewTask(()-> BigTextDO.saveFormInputs(href, id, value));
+        }
     }
 
     public interface BridgeListener {
@@ -366,6 +461,8 @@ public class VideoInterface {
 
         void translate(String text);
 
+        void translateBolan(String text);
+
         void refreshPage(boolean scrollTop);
 
         void back(boolean refreshPage);
@@ -397,5 +494,13 @@ public class VideoInterface {
         String getRequestHeaders0();
 
         String getHeaderUrl(String url);
+
+        String clearM3u8Ad(String url);
+
+        void registerMenuCommand(String rule, String menu, String func);
+
+        void unregisterMenuCommand(String rule, String menu);
+
+        void openThirdApp(String scheme);
     }
 }

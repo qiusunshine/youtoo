@@ -11,7 +11,7 @@ import java.util.List;
  * 时间：At 12:17
  */
 public class CollectionUtil {
-    public static <T> List<T> asList(T... a){
+    public static <T> List<T> asList(T... a) {
         List<T> data = new ArrayList<>();
         Collections.addAll(data, a);
         return data;
@@ -30,6 +30,10 @@ public class CollectionUtil {
 
     public static boolean isEmpty(Collection<?> collection) {
         return (collection == null || collection.isEmpty());
+    }
+
+    public static boolean isEmpty(String[] collection) {
+        return (collection == null || collection.length <= 0);
     }
 
     public static boolean isNotEmpty(Collection<?> collection) {

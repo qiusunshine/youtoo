@@ -114,6 +114,14 @@ public class AdUrlBlocker {
         return null;
     }
 
+    public boolean hasBlockRules(String url) {
+        if (StringUtil.isEmpty(url)) {
+            return false;
+        }
+        String dom = StringUtil.getDom(url);
+        return subscribeAdBlockRules != null && subscribeAdBlockRules.containsKey(dom);
+    }
+
     private AdUrlBlocker() {
         try {
             blockUrls.addAll(LitePal.findAll(AdBlockUrl.class));
@@ -212,8 +220,8 @@ public class AdUrlBlocker {
                 return -1;
             }
         }
-        if(CollectionUtil.isNotEmpty(blockUrls)){
-            synchronized (blockUrls){
+        if (CollectionUtil.isNotEmpty(blockUrls)) {
+            synchronized (blockUrls) {
                 for (AdBlockUrl blockUrl : blockUrls) {
                     if (checkBlockRule(url, dom, blockUrl.getUrl())) {
                         return blockUrl.getId();

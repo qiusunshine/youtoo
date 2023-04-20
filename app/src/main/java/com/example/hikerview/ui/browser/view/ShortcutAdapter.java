@@ -172,7 +172,7 @@ public class ShortcutAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             count3 = data[2];
         }
         holder.textView1.setText(("收藏书签：" + count1));
-        holder.textView2.setText(("视频下载：" + count2));
+        holder.textView2.setText(("文件下载：" + count2));
         holder.textView3.setText(("网页插件：" + count3));
         GridLayoutManager.LayoutParams lp = (GridLayoutManager.LayoutParams) holder.shortcut_bg.getLayoutParams();
         int dp_5 = DisplayUtil.dpToPx(context, 5);
