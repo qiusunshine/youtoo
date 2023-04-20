@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
 import com.example.hikerview.R
 import com.example.hikerview.constants.ArticleColTypeEnum
 import com.example.hikerview.event.web.UpdateBgEvent
@@ -18,12 +19,13 @@ import com.example.hikerview.ui.picture.service.IPictureParser
 import com.example.hikerview.ui.view.PopImageLoader
 import com.example.hikerview.ui.view.PopImageLoaderNoView
 import com.example.hikerview.ui.view.SmartRefreshLayout
+import com.example.hikerview.ui.view.popup.MyImageViewerPopupView
 import com.example.hikerview.ui.view.popup.MyXpopup
+import com.example.hikerview.ui.view.popup.XPopupImageLoader
 import com.example.hikerview.utils.ImgUtil
+import com.example.hikerview.utils.ThreadTool
 import com.example.hikerview.utils.ToastMgr
 import com.lxj.xpopup.XPopup
-import com.lxj.xpopup.core.ImageViewerPopupView
-import com.lxj.xpopup.interfaces.XPopupImageLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -100,7 +102,7 @@ class PictureItemsFragment(
                         -1,
                         true,
                         Color.rgb(32, 36, 46),
-                        { popupView: ImageViewerPopupView, position1: Int ->
+                        { popupView: MyImageViewerPopupView, position1: Int ->
                             // 作用是当Pager切换了图片，需要更新源View
                             try {
                                 popupView.updateSrcView(null)
@@ -113,8 +115,9 @@ class PictureItemsFragment(
                         },
                         imageLoader
                     )
+                imageViewerPopupView.isCustomSaveBtn = true
                 imageViewerPopupView.setOnShowTask {
-                    imageViewerPopupView.saveView.text = "设为主题"
+                    imageViewerPopupView.saveView.text = "设为壁纸"
                     imageViewerPopupView.saveView.setOnClickListener {
                         useAsBg(imageViewerPopupView.pos)
                     }
@@ -135,11 +138,11 @@ class PictureItemsFragment(
             }
 
             override fun onLongClick(view: View?, position: Int) {
-                val ops = arrayOf("设为主题", "保存图片")
+                val ops = arrayOf("设为壁纸", "保存图片")
                 XPopup.Builder(context)
                     .asCenterList(null, ops) { _, text ->
                         when (text) {
-                            "设为主题" -> {
+                            "设为壁纸" -> {
                                 useAsBg(position)
                             }
                             "保存图片" -> ImgUtil.savePic2Gallery(
@@ -197,31 +200,33 @@ class PictureItemsFragment(
     }
 
     private fun useAsBg(position: Int) {
-        ImgUtil.savePic2Gallery(
-            context,
-            list[position].pic,
-            null,
-            object : ImgUtil.OnSaveListener {
-                override fun success(paths: MutableList<String>?) {
-                    runOnUiThread {
-                        EventBus.getDefault()
-                            .post(UpdateBgEvent(paths?.get(0)))
+        ThreadTool.async {
+            try {
+                val file = Glide.with(requireActivity())
+                    .downloadOnly()
+                    .load(list[position].pic)
+                    .submit()
+                    .get()
+                if (file != null && file.exists()) {
+                    EventBus.getDefault()
+                        .post(UpdateBgEvent(file.absolutePath))
+                    ThreadTool.runOnUI {
                         ToastMgr.shortBottomCenter(
                             context,
-                            "已设为主题"
+                            "已设为主页壁纸"
                         )
                     }
                 }
-
-                override fun failed(msg: String) {
-                    runOnUiThread {
-                        ToastMgr.shortBottomCenter(
-                            context,
-                            msg
-                        )
-                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                ThreadTool.runOnUI {
+                    ToastMgr.shortBottomCenter(
+                        context,
+                        "出错：" + e.message
+                    )
                 }
-            })
+            }
+        }
     }
 
     override fun initData() {

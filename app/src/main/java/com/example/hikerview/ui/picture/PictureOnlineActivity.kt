@@ -46,7 +46,7 @@ class PictureOnlineActivity : BaseActivity() {
             R.id.source1, R.id.source2 ->
                 supportFragmentManager
                     .beginTransaction()
-                    .replace(R.id.bg, PictureListFragment(PictureParserPool.getById(item.itemId)))
+                    .replace(R.id.fragment_bg, PictureListFragment(PictureParserPool.getById(item.itemId)))
                     .commit()
             R.id.about ->
                 ToastMgr.shortBottomCenter(context, "还没写")
