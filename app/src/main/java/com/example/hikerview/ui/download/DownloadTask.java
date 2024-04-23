@@ -49,6 +49,10 @@ public class DownloadTask {
     private String contentType;
     private String originalTitle;
 
+    private boolean ignoreError;
+
+    private int downloadThread;
+
 
     public DownloadTask(String taskId, String fileName, String videoType, String fileExtension, String url, String sourcePageUrl, String sourcePageTitle, Long size) {
         this.taskId = taskId;
@@ -247,5 +251,21 @@ public class DownloadTask {
 
     public void setOriginalTitle(String originalTitle) {
         this.originalTitle = originalTitle;
+    }
+
+    public boolean isIgnoreError() {
+        return ignoreError;
+    }
+
+    public void setIgnoreError(boolean ignoreError) {
+        this.ignoreError = ignoreError;
+    }
+
+    public int getDownloadThread() {
+        return downloadThread;
+    }
+
+    public void setDownloadThread(int downloadThread) {
+        this.downloadThread = downloadThread;
     }
 }

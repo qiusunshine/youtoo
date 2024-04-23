@@ -24,6 +24,7 @@ import com.example.hikerview.ui.download.util.VideoFormatUtil;
 import com.example.hikerview.ui.view.popup.InputPopup;
 import com.example.hikerview.ui.webdlan.LocalServerParser;
 import com.example.hikerview.utils.ClipboardUtil;
+import com.example.hikerview.utils.DisplayUtil;
 import com.example.hikerview.utils.FileEntity;
 import com.example.hikerview.utils.FileUtil;
 import com.example.hikerview.utils.FilesInAppUtil;
@@ -157,6 +158,7 @@ public class DownloadChooser {
                         }
                     });
             new XPopup.Builder(context)
+                    .borderRadius(DisplayUtil.dpToPx(context, 16))
                     .asCustom(inputPopup)
                     .show();
         } else {
@@ -183,6 +185,7 @@ public class DownloadChooser {
             if (StringUtil.isNotEmpty(u)) {
                 if (StringUtil.isNotEmpty(t) && !t.contains(".")) {
                     new XPopup.Builder(context)
+                            .borderRadius(DisplayUtil.dpToPx(context, 16))
                             .asConfirm("温馨提示", "文件名不包含后缀，建议加上后缀或者文件名留空让Aria2自动识别，是否忽略提示继续调用Aria2下载？", () -> {
                                 inputPopup.dismiss();
                                 startDownloadUseAria2(aria2, secret, t, u, originalUrl);
@@ -196,6 +199,7 @@ public class DownloadChooser {
             }
         });
         new XPopup.Builder(context)
+                .borderRadius(DisplayUtil.dpToPx(context, 16))
                 .asCustom(inputPopup)
                 .show();
     }
@@ -246,43 +250,31 @@ public class DownloadChooser {
                     if (file.isDirectory() || file.getName().endsWith(".download") || file.getName().endsWith(".temp")) {
                         continue;
                     }
-                    if (UrlDetector.isMusic(file.getName())) {
-                        DownloadRecord record = new DownloadRecord();
-                        String fileName = file.getName();
-                        record.setFileName(fileName);
-                        record.setSourcePageTitle(fileName);
-                        record.setSourcePageUrl(file.getAbsolutePath());
-                        record.setFileExtension(FileUtil.getExtension(fileName));
-                        record.setStatus(DownloadStatusEnum.SUCCESS.getCode());
-                        record.setSize(FileUtil.getFolderSize(file));
-                        record.setTotalDownloaded(record.getSize());
-                        record.setFilm("音乐/音频文件");
-                        record.setVideoType("normal");
-                        record.setRootPath(getRootPath(context));
-                        record.setOrder((int) (file.lastModified() / 1000));
-                        record.setSaveTime(file.lastModified());
-                        records.add(record);
-                    } else {
-                        DownloadRecord record = new DownloadRecord();
-                        String fileName = file.getName();
-                        record.setFileName(fileName);
-                        record.setSourcePageTitle(fileName);
-                        record.setSourcePageUrl(file.getAbsolutePath());
-                        record.setFileExtension(FileUtil.getExtension(fileName));
-                        record.setStatus(DownloadStatusEnum.SUCCESS.getCode());
-                        record.setSize(FileUtil.getFolderSize(file));
-                        record.setTotalDownloaded(record.getSize());
-                        record.setVideoType("normal");
-                        record.setFilm("非音视频格式文件");
-                        record.setRootPath(getRootPath(context));
-                        record.setOrder((int) (file.lastModified() / 1000));
-                        record.setSaveTime(file.lastModified());
-                        records.add(record);
-                    }
+                    DownloadRecord record = new DownloadRecord();
+                    String fileName = file.getName();
+                    record.setFileName(fileName);
+                    record.setSourcePageTitle(fileName);
+                    record.setSourcePageUrl(file.getAbsolutePath());
+                    record.setFileExtension(FileUtil.getExtension(fileName));
+                    record.setStatus(DownloadStatusEnum.SUCCESS.getCode());
+                    record.setSize(FileUtil.getFolderSize(file));
+                    record.setTotalDownloaded(record.getSize());
+                    record.setVideoType("normal");
+                    record.setFilm(smartFilm(fileName));
+                    record.setRootPath(getRootPath(context));
+                    record.setOrder((int) (file.lastModified() / 1000));
+                    record.setSaveTime(file.lastModified());
+                    records.add(record);
                 }
             }
         }
 
+        records.addAll(scanLocalFiles(context));
+        return records;
+    }
+
+    public static List<DownloadRecord> scanLocalFiles(Context context) {
+        List<DownloadRecord> records = new ArrayList<>();
         List<FileEntity> fileEntities = FilesUtilsKt.scanLocalFiles(context);
         if (CollectionUtil.isNotEmpty(fileEntities)) {
             for (FileEntity fileEntity : fileEntities) {
@@ -304,8 +296,7 @@ public class DownloadChooser {
                 record.setTotalDownloaded(record.getSize());
                 record.setVideoType("normal");
                 if (StringUtil.isEmpty(film)) {
-                    film = UrlDetector.isVideoOrMusic(fileName) ?
-                            (UrlDetector.isMusic(fileName) ? "音乐/音频文件" : "") : "非音视频格式文件";
+                    film = smartFilm(fileName);
                 }
                 record.setFilm(film);
                 try {
@@ -319,6 +310,37 @@ public class DownloadChooser {
             }
         }
         return records;
+    }
+
+    public static String smartFilm(String fileName) {
+        return smartFilm(fileName, false);
+    }
+
+    public static String smartFilm(String fileName, boolean includeVideo) {
+        if (fileName == null || fileName.isEmpty() || !DownloadConfig.smartFilm) {
+            return "";
+        }
+        if (UrlDetector.isVideoOrMusic(fileName)) {
+            if (!UrlDetector.isMusic(fileName)) {
+                return includeVideo ? "视频" : "";
+            } else {
+                return "音乐/音频";
+            }
+        } else if (UrlDetector.isImage(fileName)) {
+            return "图片";
+        } else if (fileName.contains(".zip") || fileName.contains(".rar") || fileName.contains(".7z") || fileName.contains(".tar") || fileName.contains(".gz")) {
+            return "压缩包";
+        } else if (fileName.contains(".txt") || fileName.contains(".epub") || fileName.contains(".azw3") || fileName.contains(".mobi") || fileName.contains(".pdf")
+                || fileName.contains(".doc") || fileName.contains(".xls") || fileName.contains(".json")) {
+            return "文档/电子书";
+        } else if (fileName.contains(".apk") || fileName.contains(".exe") || fileName.contains(".hap") || fileName.contains(".msi") || fileName.contains(".dmg")) {
+            return "安装包";
+        }
+        return "其它格式";
+    }
+
+    public static boolean isSystemFilm(String film) {
+        return "音乐/音频".equals(film) || "图片".equals(film) || "压缩包".equals(film) || "文档/电子书".equals(film) || "安装包".equals(film) || "其它格式".equals(film);
     }
 
     public static String getRootPath(Context context) {

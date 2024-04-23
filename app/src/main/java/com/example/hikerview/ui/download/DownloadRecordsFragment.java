@@ -15,14 +15,28 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import com.annimon.stream.Stream;
+import com.annimon.stream.function.Consumer;
+import com.aroma.unrartool.UnrarUtilKt;
 import com.example.hikerview.R;
 import com.example.hikerview.model.DownloadRecord;
+import com.example.hikerview.service.exception.ParseException;
+import com.example.hikerview.service.parser.JSEngine;
+import com.example.hikerview.service.parser.PageParser;
 import com.example.hikerview.ui.ActivityManager;
+import com.example.hikerview.ui.Application;
 import com.example.hikerview.ui.base.BaseFragment;
 import com.example.hikerview.ui.browser.model.UrlDetector;
+import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.browser.util.UUIDUtil;
+import com.example.hikerview.ui.detail.DetailUIHelper;
 import com.example.hikerview.ui.download.exception.DownloadErrorException;
+import com.example.hikerview.ui.home.model.ArticleListRule;
 import com.example.hikerview.ui.home.reader.EpubFile;
+import com.example.hikerview.ui.miniprogram.MiniProgramRouter;
+import com.example.hikerview.ui.miniprogram.data.RuleDTO;
+import com.example.hikerview.ui.setting.file.FileBrowserActivity;
 import com.example.hikerview.ui.thunder.ThunderManager;
 import com.example.hikerview.ui.video.PlayerChooser;
 import com.example.hikerview.ui.video.VideoChapter;
@@ -31,8 +45,10 @@ import com.example.hikerview.ui.view.PopImageLoaderNoView;
 import com.example.hikerview.ui.view.XGridLayoutManager;
 import com.example.hikerview.ui.view.popup.MyXpopup;
 import com.example.hikerview.ui.webdlan.LocalServerParser;
+import com.example.hikerview.ui.webdlan.RemoteServerManager;
 import com.example.hikerview.utils.AutoImportHelper;
 import com.example.hikerview.utils.ClipboardUtil;
+import com.example.hikerview.utils.DisplayUtil;
 import com.example.hikerview.utils.FileUtil;
 import com.example.hikerview.utils.FilesUtilsKt;
 import com.example.hikerview.utils.HeavyTaskUtil;
@@ -40,9 +56,13 @@ import com.example.hikerview.utils.ShareUtil;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.ThreadTool;
 import com.example.hikerview.utils.ToastMgr;
+import com.example.hikerview.utils.UriUtils;
+import com.example.hikerview.utils.ZipUtils;
 import com.jeffmony.m3u8library.listener.IVideoTransformListener;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
+import com.lxj.xpopup.interfaces.OnConfirmListener;
+import com.yanzhenjie.andserver.Server;
 
 import org.litepal.LitePal;
 
@@ -136,24 +156,29 @@ public class DownloadRecordsFragment extends BaseFragment {
         }
     }
 
+
     private void checkOpenIntent(boolean downloaded) {
         String openRecord = getActivity() != null ? getActivity().getIntent().getStringExtra("openRecord") : "";
         if (downloaded && !opened && StringUtil.isNotEmpty(openRecord)) {
             opened = true;
             getActivity().getIntent().removeExtra("openRecord");
-            for (DownloadRecord record : this.rules) {
-                if (openRecord.equals(record.getTaskId())) {
-                    if (StringUtil.isNotEmpty(record.getFilm()) && !record.getFilm().equals(selectFilm)) {
-                        updateShowList(record.getFilm());
-                    }
-                    for (int i = 0; i < showList.size(); i++) {
-                        if (openRecord.equals(showList.get(i).getTaskId())) {
-                            onItemClickListener.onClick(null, i);
-                            return;
-                        }
-                    }
-                    return;
+            openTaskItem(openRecord);
+        }
+    }
+
+    public void openTaskItem(String openRecord) {
+        for (DownloadRecord record : this.rules) {
+            if (openRecord.equals(record.getTaskId())) {
+                if (StringUtil.isNotEmpty(record.getFilm()) && !record.getFilm().equals(selectFilm)) {
+                    updateShowList(record.getFilm());
                 }
+                for (int i = 0; i < showList.size(); i++) {
+                    if (openRecord.equals(showList.get(i).getTaskId())) {
+                        onItemClickListener.onClick(null, i);
+                        return;
+                    }
+                }
+                return;
             }
         }
     }
@@ -213,6 +238,28 @@ public class DownloadRecordsFragment extends BaseFragment {
                     records.add(0, record);
                 }
             }
+            long max = -1;
+            DownloadRecord maxRecord = null;
+            for (DownloadRecord record : records) {
+                try {
+                    record.setLastPlay(false);
+                    if (StringUtil.isNotEmpty(record.getPlayPos())) {
+                        String[] s = record.getPlayPos().split("@@");
+                        if (s.length > 1) {
+                            long t = Long.parseLong(s[1]);
+                            if (t > max) {
+                                max = t;
+                                maxRecord = record;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            if (maxRecord != null) {
+                maxRecord.setLastPlay(true);
+            }
             showList.clear();
             showList.addAll(records);
         }
@@ -239,6 +286,9 @@ public class DownloadRecordsFragment extends BaseFragment {
                 onLongClick(view, position);
                 return;
             }
+            if (record.getFullName() == null) {
+                record.setFileName("");
+            }
             if (record.getFullName().endsWith(".torrent")) {
                 ThunderManager.INSTANCE.startDownloadMagnet(getContext(), getLocalPath(record));
                 return;
@@ -247,10 +297,15 @@ public class DownloadRecordsFragment extends BaseFragment {
                 EpubFile.INSTANCE.showEpubView(getContext(), getLocalPath(record));
                 return;
             }
+            if (record.getFullName().endsWith(".zip") || record.getFullName().endsWith(".rar")) {
+                showZipPopup(record, record.getFullName().endsWith(".rar"));
+                return;
+            }
             checkDownload(record);
             if (UrlDetector.isImage(record.getFullName())) {
                 String path = "file://" + getLocalPath(record);
                 new MyXpopup().Builder(getContext())
+                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                         .asImageViewer(null, path, new PopImageLoaderNoView(path))
                         .show();
                 return;
@@ -270,6 +325,16 @@ public class DownloadRecordsFragment extends BaseFragment {
                             return;
                         }
                     }
+                    if (file.getName().endsWith(".txt") && file.length() > 200 * 1024) {
+                        //大于200k的txt
+                        showTxtPopup(file);
+                        return;
+                    }
+                    if (file.getName().endsWith(".srt")
+                            || file.getName().endsWith(".ass")
+                            || file.getName().endsWith(".vtt")) {
+                        ToastMgr.shortCenter(getContext(), "播放器更多功能里面可以外挂字幕");
+                    }
                     ShareUtil.findChooserToDeal(getContext(), file.getAbsolutePath());
                     return;
                 }
@@ -288,14 +353,19 @@ public class DownloadRecordsFragment extends BaseFragment {
                 if ("dir".equals(showList.get(i).getVideoType())) {
                     continue;
                 }
+                if (!UrlDetector.isVideoOrMusic(showList.get(i).getFullName())) {
+                    continue;
+                }
                 VideoChapter videoChapter = new VideoChapter();
-                videoChapter.setTitle(showList.get(i).getSourcePageTitle());
+                videoChapter.setMemoryTitle(showList.get(i).getSourcePageTitle());
+                videoChapter.setTitle(DetailUIHelper.getTitleText(showList.get(i).getSourcePageTitle()));
                 videoChapter.setUse(false);
                 videoChapter.setDownloadRecord(showList.get(i));
                 chapters.add(videoChapter);
             }
             VideoChapter videoChapter = new VideoChapter();
-            videoChapter.setTitle(showList.get(position).getSourcePageTitle());
+            videoChapter.setMemoryTitle(showList.get(position).getSourcePageTitle());
+            videoChapter.setTitle(DetailUIHelper.getTitleText(showList.get(position).getSourcePageTitle()));
             videoChapter.setUrl(u);
             videoChapter.setDownloadRecord(showList.get(position));
             videoChapter.setUse(true);
@@ -304,8 +374,12 @@ public class DownloadRecordsFragment extends BaseFragment {
                 if ("dir".equals(showList.get(i).getVideoType())) {
                     continue;
                 }
+                if (!UrlDetector.isVideoOrMusic(showList.get(i).getFullName())) {
+                    continue;
+                }
                 VideoChapter chapter = new VideoChapter();
-                chapter.setTitle(showList.get(i).getSourcePageTitle());
+                chapter.setMemoryTitle(showList.get(i).getSourcePageTitle());
+                chapter.setTitle(DetailUIHelper.getTitleText(showList.get(i).getSourcePageTitle()));
                 chapter.setDownloadRecord(showList.get(i));
                 chapter.setUse(false);
                 chapters.add(chapter);
@@ -330,86 +404,173 @@ public class DownloadRecordsFragment extends BaseFragment {
             String[] operations;
 
             if ("dir".equals(record.getVideoType())) {
-                operations = new String[]{"删除下载", "重命名标题", "转存到公开目录"};
+                operations = new String[]{"删除下载", "重命名", "转存到公开目录"};
             } else if (DownloadStatusEnum.SUCCESS.getCode().equals(status) || DownloadStatusEnum.ERROR.getCode().equals(status)
                     || DownloadStatusEnum.CANCEL.getCode().equals(status) || DownloadStatusEnum.BREAK.getCode().equals(status)) {
                 if (DownloadStatusEnum.SUCCESS.getCode().equals(status) && "player/m3u8".equals(record.getVideoType())) {
-                    operations = new String[]{"删除下载", "批量删除", "重新下载", "重命名标题", "复制下载链接", "合并为MP4格式"};
+                    operations = new String[]{"删除下载", "批量删除", "重新下载", "重命名", "修改文件夹", "复制下载链接", "合并为MP4格式"};
                 } else if (DownloadStatusEnum.SUCCESS.getCode().equals(status) && "normal".equals(record.getVideoType())) {
-                    operations = new String[]{"删除下载", "批量删除", "重新下载", "重命名标题", "复制下载链接", "分享本地文件", "复制文件路径", "转存到公开目录"};
+                    operations = new String[]{"删除下载", "批量删除", "重新下载", "重命名", "修改后缀", "修改文件夹", "复制下载链接", "分享本地文件", "复制文件路径", "转存到公开目录"};
                 } else if (DownloadStatusEnum.ERROR.getCode().equals(status)) {
-                    operations = new String[]{"继续下载", "删除下载", "批量删除", "重新下载", "重命名标题", "复制下载链接", "更新下载链接", "复制文件路径", "强制忽略错误"};
+                    operations = new String[]{"恢复下载", "删除下载", "批量删除", "重新下载", "重命名", "修改文件夹", "复制下载链接", "更新下载链接", "复制文件路径", "强制忽略错误", "强制合并已下载"};
                 } else {
-                    operations = new String[]{"继续下载", "删除下载", "批量删除", "重新下载", "重命名标题", "复制下载链接", "更新下载链接", "复制文件路径"};
+                    operations = new String[]{"恢复下载", "删除下载", "批量删除", "重新下载", "重命名", "修改文件夹", "复制下载链接", "更新下载链接", "复制文件路径"};
                 }
             } else {
-                if ("player/m3u8".equals(record.getVideoType())) {
-                    operations = new String[]{"边下边播", "暂停下载", "取消下载", "批量取消"};
-                } else {
-                    operations = new String[]{"暂停下载", "取消下载", "批量取消"};
-                }
+                operations = new String[]{"边下边播", "暂停下载", "取消下载", "批量取消"};
             }
             new XPopup.Builder(getContext())
+                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                     .asCustom(new CustomCenterRecyclerViewPopup(getContext())
                             .withTitle("请选择操作")
                             .with(operations, operations.length > 4 ? 2 : 1, new CustomCenterRecyclerViewPopup.ClickListener() {
                                 @Override
                                 public void click(String text, int option) {
                                     switch (text) {
+                                        case "修改文件夹":
+                                            List<String> groups = Stream.of(rules)
+                                                    .filter(it -> StringUtil.isNotEmpty(it.getFilm()) && !DownloadChooser.isSystemFilm(it.getFilm()))
+                                                    .map(DownloadRecord::getFilm).distinct().toList();
+                                            groups.add("新建文件夹");
+                                            new XPopup.Builder(getContext())
+                                                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                                    .asCustom(new CustomCenterRecyclerViewPopup(getContext())
+                                                            .withTitle("请选择")
+                                                            .with(groups, 2, new CustomCenterRecyclerViewPopup.ClickListener() {
+                                                                @Override
+                                                                public void click(String tt, int pp) {
+                                                                    if ("新建文件夹".equals(tt)) {
+                                                                        new XPopup.Builder(getContext()).borderRadius(DisplayUtil.dpToPx(getContext(), 16)).asInputConfirm("新建文件夹", null,
+                                                                                        "", "请输入名称，不能为空",
+                                                                                        text1 -> {
+                                                                                            if (StringUtil.isEmpty(text1)) {
+                                                                                                ToastMgr.shortBottomCenter(getContext(), "不能为空");
+                                                                                                return;
+                                                                                            }
+                                                                                            modifyDir(record, text1);
+                                                                                        })
+                                                                                .show();
+                                                                    } else {
+                                                                        modifyDir(record, tt);
+                                                                    }
+                                                                }
+
+                                                                private void modifyDir(DownloadRecord record, String text1) {
+                                                                    if (record.getId() > 0) {
+                                                                        record.setFilm(text1);
+                                                                        record.save();
+                                                                    } else {
+                                                                        if (FilesUtilsKt.inDownloadDir(getContext(), record)) {
+                                                                            if (record.getFileName().contains("@@")) {
+                                                                                text1 = text1 + "@@" + record.getFileName().split("@@")[1];
+                                                                            } else {
+                                                                                text1 = text1 + "@@" + record.getFileName();
+                                                                            }
+                                                                            FilesUtilsKt.renameFileByPath(getContext(), record.getFailedReason(), text1);
+                                                                        } else {
+                                                                            ToastMgr.shortBottomCenter(getContext(), "设置文件夹失败，未找到下载记录");
+                                                                            return;
+                                                                        }
+                                                                    }
+                                                                    updateShowList();
+                                                                    adapter.notifyDataSetChanged();
+                                                                    ToastMgr.shortBottomCenter(getContext(), "设置文件夹成功");
+                                                                }
+
+                                                                @Override
+                                                                public void onLongClick(String tt, int pp) {
+
+                                                                }
+                                                            })).show();
+                                            break;
                                         case "边下边播":
-                                            play(record, position);
+                                            playWhenDownloading0(getContext(), record);
                                             break;
                                         case "删除下载":
                                             deleteByRecord(record);
                                             break;
-                                        case "重命名标题":
-                                            new XPopup.Builder(getContext()).asInputConfirm("重命名标题", null,
-                                                    record.getSourcePageTitle(), "请输入标题，不能为空",
-                                                    text1 -> {
-                                                        if (StringUtil.isEmpty(text1)) {
-                                                            ToastMgr.shortBottomCenter(getContext(), "不能为空");
-                                                            return;
-                                                        }
-                                                        if ("dir".equals(record.getVideoType())) {
-                                                            if ("音乐/音频文件".equals(record.getSourcePageTitle()) || "非音视频格式文件".equals(record.getSourcePageTitle())) {
-                                                                ToastMgr.shortBottomCenter(getContext(), "当前文件夹不支持重命名");
-                                                                return;
-                                                            }
-                                                            for (DownloadRecord rule : rules) {
-                                                                if (record.getSourcePageTitle().equals(rule.getFilm())) {
-                                                                    if (FilesUtilsKt.inDownloadDir(getContext(), rule)) {
-                                                                        String name = rule.getFileName();
-                                                                        if (name.contains("@@")) {
-                                                                            name = text1 + "@@" + rule.getSourcePageTitle();
+                                        case "修改后缀":
+                                            if (record.getId() <= 0) {
+                                                ToastMgr.shortBottomCenter(getContext(), "当前文件不支持修改后缀");
+                                                break;
+                                            }
+                                            new XPopup.Builder(getContext()).borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                                    .asInputConfirm("修改文件格式后缀", null,
+                                                            record.getFileExtension(), "请输入后缀",
+                                                            text1 -> {
+                                                                if (StringUtil.isEmpty(text1)) {
+                                                                    ToastMgr.shortBottomCenter(getContext(), "不能为空");
+                                                                    return;
+                                                                }
+                                                                if (record.getId() > 0) {
+                                                                    String normalPath = DownloadManager.getNormalFilePath(record);
+                                                                    if (normalPath != null) {
+                                                                        File file = new File(normalPath);
+                                                                        if (file.exists() && !file.isDirectory()) {
+                                                                            replaceFileExtension(file.getAbsolutePath(), text1);
+                                                                            record.setFileExtension(text1);
+                                                                            record.save();
+                                                                            updateShowList();
+                                                                            adapter.notifyDataSetChanged();
+                                                                            return;
                                                                         }
-                                                                        FilesUtilsKt.renameFileByPath(getContext(), rule.getFailedReason(), name);
-                                                                    } else {
-                                                                        rule.setFilm(text1);
-                                                                        rule.save();
                                                                     }
                                                                 }
-                                                            }
-                                                        } else {
-                                                            record.setSourcePageTitle(text1);
-                                                            if (record.getId() > 0) {
-                                                                record.save();
-                                                            } else {
-                                                                if (FilesUtilsKt.inDownloadDir(getContext(), record)) {
-                                                                    if (record.getFileName().contains("@@")) {
-                                                                        text1 = record.getFileName().split("@@")[0] + "@@" + text1;
+                                                                ToastMgr.shortBottomCenter(getContext(), "当前文件不支持修改后缀");
+                                                            })
+                                                    .show();
+                                            break;
+                                        case "重命名":
+                                        case "重命名标题":
+                                            if ("dir".equals(record.getVideoType())) {
+                                                if (DownloadChooser.isSystemFilm(record.getSourcePageTitle())) {
+                                                    ToastMgr.shortBottomCenter(getContext(), "当前文件夹不支持重命名");
+                                                    return;
+                                                }
+                                            }
+                                            new XPopup.Builder(getContext()).borderRadius(DisplayUtil.dpToPx(getContext(), 16)).asInputConfirm("重命名标题", null,
+                                                            record.getSourcePageTitle(), "请输入标题，不能为空",
+                                                            text1 -> {
+                                                                if (StringUtil.isEmpty(text1)) {
+                                                                    ToastMgr.shortBottomCenter(getContext(), "不能为空");
+                                                                    return;
+                                                                }
+                                                                if ("dir".equals(record.getVideoType())) {
+                                                                    for (DownloadRecord rule : rules) {
+                                                                        if (record.getSourcePageTitle().equals(rule.getFilm())) {
+                                                                            if (FilesUtilsKt.inDownloadDir(getContext(), rule)) {
+                                                                                String name = rule.getFileName();
+                                                                                if (name.contains("@@")) {
+                                                                                    name = text1 + "@@" + rule.getSourcePageTitle();
+                                                                                }
+                                                                                FilesUtilsKt.renameFileByPath(getContext(), rule.getFailedReason(), name);
+                                                                            } else {
+                                                                                rule.setFilm(text1);
+                                                                                rule.save();
+                                                                            }
+                                                                        }
                                                                     }
-                                                                    FilesUtilsKt.renameFileByPath(getContext(), record.getFailedReason(), text1);
                                                                 } else {
-                                                                    File file = new File(DownloadChooser.getRootPath(getContext()) + File.separator + record.getFileName());
-                                                                    if (file.exists()) {
-                                                                        file.renameTo(new File(DownloadChooser.getRootPath(getContext()) + File.separator + text1));
+                                                                    record.setSourcePageTitle(text1);
+                                                                    if (record.getId() > 0) {
+                                                                        record.save();
+                                                                    } else {
+                                                                        if (FilesUtilsKt.inDownloadDir(getContext(), record)) {
+                                                                            if (record.getFileName().contains("@@")) {
+                                                                                text1 = record.getFileName().split("@@")[0] + "@@" + text1;
+                                                                            }
+                                                                            FilesUtilsKt.renameFileByPath(getContext(), record.getFailedReason(), text1);
+                                                                        } else {
+                                                                            File file = new File(DownloadChooser.getRootPath(getContext()) + File.separator + record.getFileName());
+                                                                            if (file.exists()) {
+                                                                                file.renameTo(new File(DownloadChooser.getRootPath(getContext()) + File.separator + text1));
+                                                                            }
+                                                                        }
                                                                     }
                                                                 }
-                                                            }
-                                                        }
-                                                        updateShowList();
-                                                        adapter.notifyDataSetChanged();
-                                                    })
+                                                                updateShowList();
+                                                                adapter.notifyDataSetChanged();
+                                                            })
                                                     .show();
                                             break;
                                         case "批量删除":
@@ -419,7 +580,7 @@ public class DownloadRecordsFragment extends BaseFragment {
                                         case "复制下载链接":
                                             ClipboardUtil.copyToClipboard(getContext(), record.getSourcePageUrl());
                                             break;
-                                        case "强制忽略错误":
+                                        case "强制合并已下载":
                                             try {
                                                 if ("normal".equals(record.getVideoType())) {
                                                     HeavyTaskUtil.executeNewTask(() -> {
@@ -441,6 +602,13 @@ public class DownloadRecordsFragment extends BaseFragment {
                                                 ToastMgr.shortBottomCenter(getContext(), e.getMessage() + "，不支持强制忽略");
                                             }
                                             break;
+                                        case "强制忽略错误":
+                                            new XPopup.Builder(getContext())
+                                                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                                    .asConfirm("温馨提示", "开启强制忽略错误后，下载片段出现404、403等错误时软件会自动跳过此片段，继续下载后续片段", () -> {
+                                                        continueDownload(getContext(), record, true, false);
+                                                    }).show();
+                                            break;
                                         case "分享本地文件":
                                             ShareUtil.findChooserToSend(getContext(), getLocalPath(record));
                                             break;
@@ -449,6 +617,7 @@ public class DownloadRecordsFragment extends BaseFragment {
                                             break;
                                         case "合并为MP4格式":
                                             transformLoadingPopup = new XPopup.Builder(getContext())
+                                                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                                                     .asLoading("合并中");
                                             transformLoadingPopup.show();
                                             DownloadManager.transformM3U8ToMp4(getContext(), record, new IVideoTransformListener() {
@@ -484,31 +653,20 @@ public class DownloadRecordsFragment extends BaseFragment {
                                             });
                                             break;
                                         case "重新下载":
-                                            reDownload(record);
+                                            reDownload(getContext(), record);
                                             break;
                                         case "更新下载链接":
-                                            if ("player/m3u8".equals(record.getVideoType())) {
-                                                //m3u8格式
-                                                String m3u8 = DownloadConfig.rootPath + File.separator + record.getFileName() + ".temp"
-                                                        + File.separator + "index.m3u8";
-                                                if (new File(m3u8).exists()) {
-                                                    ToastMgr.shortCenter(getContext(), "暂不支持更新m3u8格式地址");
-                                                    return;
+                                            showUpdateDownloadUrlPopup(getContext(), record, record.getSourcePageUrl());
+                                            break;
+                                        case "恢复下载":
+                                            continueDownload(getContext(), record, false, false);
+                                            break;
+                                        case "恢复全部":
+                                            for (DownloadRecord downloadRecord : showList) {
+                                                if (DownloadStatusEnum.BREAK.getCode().equals(downloadRecord.getStatus())) {
+                                                    continueDownload(getContext(), downloadRecord, false, true);
                                                 }
                                             }
-                                            new XPopup.Builder(getContext())
-                                                    .asInputConfirm("更新下载地址", "输入新的地址，点击确定后将继续下载", record.getSourcePageUrl(), "", t1 -> {
-                                                        if (StringUtil.isNotEmpty(t1)) {
-                                                            record.setSourcePageUrl(t1);
-                                                            record.save();
-                                                            continueDownload(record);
-                                                        }
-                                                    }, () -> {
-
-                                                    }, R.layout.xpopup_confirm_input).show();
-                                            break;
-                                        case "继续下载":
-                                            continueDownload(record);
                                             break;
                                         case "暂停下载":
                                             DownloadManager.instance().pauseTask(record.getTaskId());
@@ -523,36 +681,6 @@ public class DownloadRecordsFragment extends BaseFragment {
                                     }
                                 }
 
-                                private void continueDownload(DownloadRecord record) {
-                                    if ("player/m3u8".equals(record.getVideoType())) {
-                                        //m3u8格式
-                                        String m3u8 = DownloadConfig.rootPath + File.separator + record.getFileName() + ".temp"
-                                                + File.separator + "index.m3u8";
-                                        if (!new File(m3u8).exists()) {
-                                            new XPopup.Builder(getContext())
-                                                    .asConfirm("温馨提示", "之前下载的文件已经被删除，只能重新下载，确定重新下载？", () -> reDownload(record))
-                                                    .show();
-                                            return;
-                                        } else {
-                                            DownloadManager.instance().continueDownload(record);
-                                            ToastMgr.shortBottomCenter(getContext(), "已开始继续下载");
-                                        }
-                                    } else {
-                                        //普通文件格式
-                                        String temp = DownloadConfig.rootPath + File.separator + record.getFileName() + "." + record.getFileExtension() + ".temp";
-                                        File tempDir = new File(temp);
-                                        File[] files = tempDir.isDirectory() ? tempDir.listFiles() : null;
-                                        if (!tempDir.exists() || files == null || files.length <= 0) {
-                                            new XPopup.Builder(getContext())
-                                                    .asConfirm("温馨提示", "之前下载的文件已经被删除，只能重新下载，确定重新下载？", () -> reDownload(record))
-                                                    .show();
-                                            return;
-                                        } else {
-                                            DownloadManager.instance().continueDownload(record);
-                                            ToastMgr.shortBottomCenter(getContext(), "已开始继续下载");
-                                        }
-                                    }
-                                }
 
                                 @Override
                                 public void onLongClick(String url, int position) {
@@ -561,7 +689,400 @@ public class DownloadRecordsFragment extends BaseFragment {
                             })).show();
         }
     };
+    private static boolean replaceFileExtension(String filePath, String newExtension) {
+        File file = new File(filePath);
+        String directoryPath = file.getParent();
+        String fileName = file.getName();
+        String extension = getFileExtension(fileName);
+        String newFileName = fileName.substring(0, fileName.length() - extension.length()) + newExtension;
+        String newFilePath = directoryPath + File.separator + newFileName;
+        File newFile = new File(newFilePath);
+        return file.renameTo(newFile);
+    }
 
+    private static String getFileExtension(String fileName) {
+        int dotIndex = fileName.lastIndexOf(".");
+        if (dotIndex != -1 && dotIndex < fileName.length() - 1) {
+            return fileName.substring(dotIndex + 1);
+        }
+        return "";
+    }
+
+    private void showZipPopup(DownloadRecord record, boolean rar) {
+        String normalPath = DownloadManager.getNormalFilePath(record);
+        if (normalPath != null) {
+            File file = new File(normalPath);
+            if (file.exists() && !file.isDirectory()) {
+                new XPopup.Builder(getContext())
+                        .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                        .asCenterList(null, new String[]{"使用外部软件打开", "解压查看", "解压打开TXT/EPUB书籍", "解压查看字幕文件"}, (i, s) -> {
+                            switch (s) {
+                                case "解压查看字幕文件":
+                                    new XPopup.Builder(getContext())
+                                            .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                            .asConfirm("温馨提示", "此选项只是个提示，播放器界面外部字幕时可以直接选择该压缩包文件，软件会自动解压并外挂，因此无需在这里手动解压", () -> {
+
+                                            }).show();
+                                    break;
+                                case "解压查看":
+                                    ToastMgr.shortBottomCenter(getContext(), "解压中，请稍候");
+                                    ThreadTool.INSTANCE.async(() -> {
+                                        try {
+                                            String dir = UriUtils.getRootDir(getContext()) + File.separator + "_cache" + File.separator
+                                                    + file.getName().replace(".zip", "").replace(".rar", "");
+                                            File dirFile = new File(dir);
+                                            if (dirFile.exists()) {
+                                                FileUtil.deleteDirs(dir);
+                                            }
+                                            dirFile.mkdirs();
+                                            if (rar) {
+                                                UnrarUtilKt.unrarFile(ActivityManager.getInstance().getCurrentActivity(), file.getAbsolutePath(), dir);
+                                            } else {
+                                                ZipUtils.unzipFile(file.getAbsolutePath(), dir);
+                                            }
+                                            if (getActivity() != null && !getActivity().isFinishing()) {
+                                                ThreadTool.INSTANCE.runOnUI(() -> {
+                                                    if (isApkDir(dirFile)) {
+                                                        new XPopup.Builder(getContext())
+                                                                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                                                .asConfirm("温馨提示", "检测到压缩包疑似为APK安装包，是否直接安装？", "解压查看", "直接安装", () -> {
+                                                                    ShareUtil.findChooserToDeal(getContext(), file.getAbsolutePath(), "application/vnd.android.package-archive");
+                                                                }, () -> {
+                                                                    Intent intent2 = new Intent(getActivity(), FileBrowserActivity.class);
+                                                                    intent2.putExtra("path", dir);
+                                                                    startActivity(intent2);
+                                                                }, false).show();
+                                                        return;
+                                                    }
+                                                    Intent intent2 = new Intent(getActivity(), FileBrowserActivity.class);
+                                                    intent2.putExtra("path", dir);
+                                                    startActivity(intent2);
+                                                });
+                                            }
+                                        } catch (Exception e) {
+                                            ToastMgr.shortBottomCenter(getContext(), "解压出错：" + e.getMessage());
+                                            e.printStackTrace();
+                                        }
+                                    });
+                                    break;
+                                case "解压打开TXT/EPUB书籍":
+                                    ThreadTool.INSTANCE.async(() -> {
+                                        //zip压缩包
+                                        try {
+                                            String dir = UriUtils.getRootDir(getContext()) + File.separator + "_cache" + File.separator
+                                                    + file.getName().replace(".zip", "").replace(".rar", "");
+                                            File dirFile = new File(dir);
+                                            if (dirFile.exists()) {
+                                                FileUtil.deleteDirs(dir);
+                                            }
+                                            dirFile.mkdirs();
+                                            if (rar) {
+                                                UnrarUtilKt.unrarFile(ActivityManager.getInstance().getCurrentActivity(), file.getAbsolutePath(), dir);
+                                            } else {
+                                                ZipUtils.unzipFile(file.getAbsolutePath(), dir);
+                                            }
+                                            List<File> files = findTxtOrEpub(dirFile);
+                                            if (CollectionUtil.isNotEmpty(files)) {
+                                                if (getActivity() != null && !getActivity().isFinishing()) {
+                                                    ThreadTool.INSTANCE.runOnUI(() -> {
+                                                        if (files.size() == 1) {
+                                                            loadTxtOrEpubFile(files.get(0));
+                                                        } else {
+                                                            List<String> strings = Stream.of(files).map(File::getName).toList();
+                                                            new XPopup.Builder(getContext())
+                                                                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                                                    .asBottomList(null, CollectionUtil.toStrArray(strings), null, (p, t) -> {
+                                                                        loadTxtOrEpubFile(files.get(p));
+                                                                    }).show();
+                                                        }
+                                                    });
+                                                }
+                                            } else {
+                                                ToastMgr.shortBottomCenter(getContext(), "未在压缩包内找到txt和epub文件");
+                                            }
+                                        } catch (Exception e) {
+                                            ToastMgr.shortBottomCenter(getContext(), "解压出错：" + e.getMessage());
+                                            e.printStackTrace();
+                                        }
+                                    });
+                                    break;
+                                case "使用外部软件打开":
+                                    ShareUtil.findChooserToDeal(getContext(), file.getAbsolutePath());
+                                    break;
+                            }
+                        }).show();
+                return;
+            }
+        }
+        ToastMgr.shortBottomCenter(getContext(), "找不到本地文件");
+    }
+
+    private void loadTxtOrEpubFile(File file) {
+        if (file.getName().endsWith(".epub")) {
+            String p = DownloadConfig.rootPath + File.separator + file.getName();
+            File txtFile = new File(p);
+            if (txtFile.exists()) {
+                if (txtFile.length() != file.length()) {
+                    txtFile.delete();
+                    FileUtil.copy(file, txtFile);
+                }
+            } else {
+                FileUtil.copy(file, txtFile);
+            }
+            EpubFile.INSTANCE.showEpubView(getContext(), txtFile.getAbsolutePath());
+        } else {
+            importBookByPath(getActivity(), file);
+        }
+    }
+
+    private List<File> findTxtOrEpub(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null || files.length == 0) {
+            return null;
+        }
+        List<File> list = new ArrayList<>();
+        for (File file : files) {
+            if (!file.isDirectory() && (
+                    file.getName().endsWith(".txt")
+                            || file.getName().endsWith(".epub")
+            )) {
+                list.add(file);
+            } else if (file.isDirectory()) {
+                List<File> children = findTxtOrEpub(file);
+                if (CollectionUtil.isNotEmpty(children)) {
+                    list.addAll(children);
+                }
+            }
+        }
+        return list;
+    }
+
+    private boolean isApkDir(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null || files.length == 0) {
+            return false;
+        }
+        int count = 0;
+        for (File file : files) {
+            if (!file.isDirectory() && (
+                    file.getName().equals("AndroidManifest.xml")
+                            || file.getName().equals("resources.arsc")
+            )) {
+                count++;
+            }
+        }
+        return count == 2;
+    }
+
+    private void showTxtPopup(File file) {
+        new XPopup.Builder(getContext())
+                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                .asCenterList(null, new String[]{"使用外部软件打开", "以小说格式打开"}, (i, s) -> {
+                    switch (s) {
+                        case "以小说格式打开":
+                            importBookByPath(getActivity(), file);
+                            break;
+                        case "使用外部软件打开":
+                            ShareUtil.findChooserToDeal(getContext(), file.getAbsolutePath());
+                            break;
+                    }
+                }).show();
+    }
+
+    public static void importBookByPath(Activity context, File file) {
+        String p = JSEngine.getFilePath("hiker://files/localManager/外导小说/" + file.getName());
+        File txtFile = new File(p);
+        if (txtFile.exists()) {
+            if (txtFile.length() != file.length()) {
+                txtFile.delete();
+                FileUtil.copy(file, txtFile);
+            }
+        } else {
+            FileUtil.copy(file, txtFile);
+        }
+        ArticleListRule rule = MiniProgramRouter.INSTANCE.findArticleListRule("本地资源管理");
+        if (rule == null || !rule.getPages().contains("txtParser")) {
+            new XPopup.Builder(context)
+                    .borderRadius(DisplayUtil.dpToPx(context, 16))
+                    .asConfirm("温馨提示", "检测到您还没有安装扩展规则（LoyDgIk大佬的本地资源管理）或者版本太低，请先点击下方确定按钮导入最新扩展规则，导入后再重新点击即可打开", () -> {
+                        AutoImportHelper.checkText(context, "海阔视界首页频道规则【本地资源管理】￥home_rule_url￥http://hiker.nokia.press/hikerule/rulelist.json?id=3559");
+                    }).show();
+        } else {
+            try {
+                JSONObject extra = new JSONObject();
+                extra.put("path", p);
+                extra.put("id", p);
+                extra.put("isCache", true);
+                extra.put("title", file.getName());
+                String url = "hiker://page/txtParser.view?rule=" + rule.getTitle();
+                RuleDTO nextPage = MiniProgramRouter.INSTANCE.toRuleDTO(
+                        PageParser.getNextPage(
+                                rule,
+                                url,
+                                JSON.toJSONString(extra)
+                        ), 0
+                );
+                MiniProgramRouter.INSTANCE.startMiniProgram(
+                        context,
+                        url,
+                        file.getName(),
+                        nextPage,
+                        false,
+                        rule.getTitle(),
+                        rule.getUrl(),
+                        false,
+                        false,
+                        null
+                );
+                ToastMgr.shortBottomCenter(context, "后续可在历史记录里面续看");
+            } catch (ParseException e) {
+                e.printStackTrace();
+                ToastMgr.shortBottomCenter(context, "出错：" + e.getMessage());
+            }
+        }
+    }
+
+    public static void playWinDownloading(Context context, DownloadRecord record) {
+        playWhenDownloading0(context, record);
+    }
+
+    public static void playVideoChapter(Context context, DownloadRecord record, String u) {
+        VideoChapter videoChapter = new VideoChapter();
+        videoChapter.setMemoryTitle(record.getSourcePageTitle());
+        videoChapter.setTitle(DetailUIHelper.getTitleText(record.getSourcePageTitle()));
+        videoChapter.setUse(true);
+        videoChapter.setDownloadRecord(record);
+        videoChapter.setUrl(u);
+        List<VideoChapter> chapters = new ArrayList<>();
+        chapters.add(videoChapter);
+        PlayerChooser.startPlayer(context, chapters);
+    }
+
+
+    public static void getDownloadingPlayUrl(Context context, DownloadRecord record, Consumer<String> callback) {
+        try {
+            RemoteServerManager.instance().startServer(Application.getContext(), new Server.ServerListener() {
+                @Override
+                public void onStarted() {
+                    String playUrl = RemoteServerManager.instance().getServerUrl(Application.getContext());
+                    //这里其实getVideoType可能为空，因为还在校验中
+                    callback.accept(playUrl + ("normal".equals(record.getVideoType()) ?
+                            "/proxyDownload?id=" + record.getId()
+                            : "/proxyM3u8Download?id=" + record.getId() + "&type=.m3u8"));
+                }
+
+                @Override
+                public void onStopped() {
+
+                }
+
+                @Override
+                public void onException(Exception e) {
+                    callback.accept("");
+                    ToastMgr.shortBottomCenter(Application.application, "启动代理服务出错：" + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            callback.accept("");
+            ToastMgr.shortBottomCenter(Application.application, "启动代理服务出错：" + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private static void playWhenDownloading0(Context context, DownloadRecord record) {
+        try {
+            RemoteServerManager.instance().startServer(Application.getContext(), new Server.ServerListener() {
+                @Override
+                public void onStarted() {
+                    String playUrl = RemoteServerManager.instance().getServerUrl(Application.getContext());
+                    playVideoChapter(context, record, playUrl + ("normal".equals(record.getVideoType()) ?
+                            "/proxyDownload?id=" + record.getId()
+                            : "/proxyM3u8Download?id=" + record.getId() + "&type=.m3u8"));
+                }
+
+                @Override
+                public void onStopped() {
+
+                }
+
+                @Override
+                public void onException(Exception e) {
+                    ThreadTool.INSTANCE.runOnUI(() -> ToastMgr.shortBottomCenter(Application.application, "启动代理服务出错：" + e.getMessage()));
+                }
+            });
+        } catch (Exception e) {
+            ToastMgr.shortBottomCenter(Application.application, "启动代理服务出错：" + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public static void showUpdateDownloadUrlPopup(Context context, DownloadRecord record, String url) {
+        if ("player/m3u8".equals(record.getVideoType())) {
+            //m3u8格式
+            String m3u8 = DownloadConfig.rootPath + File.separator + record.getFileName() + ".temp"
+                    + File.separator + "index.m3u8";
+            if (new File(m3u8).exists()) {
+                ToastMgr.shortCenter(context, "暂不支持更新m3u8格式地址");
+                return;
+            }
+        }
+        new XPopup.Builder(context)
+                .borderRadius(DisplayUtil.dpToPx(context, 16))
+                .asInputConfirm("更新下载地址", "输入新的地址，点击确定后将继续下载", url, "", t1 -> {
+                    if (StringUtil.isNotEmpty(t1)) {
+                        record.setSourcePageUrl(t1);
+                        record.save();
+                        continueDownload(context, record, false, false);
+                    }
+                }, () -> {
+
+                }, R.layout.xpopup_confirm_input).show();
+    }
+
+    private static void continueDownload(Context context, DownloadRecord record, boolean ignoreError, boolean fromBatch) {
+        if ("player/m3u8".equals(record.getVideoType())) {
+            //m3u8格式
+            String m3u8 = DownloadConfig.rootPath + File.separator + record.getFileName() + ".temp"
+                    + File.separator + "index.m3u8";
+            if (!new File(m3u8).exists()) {
+                if (fromBatch) {
+                    reDownload(context, record);
+                    return;
+                }
+                new XPopup.Builder(context)
+                        .borderRadius(DisplayUtil.dpToPx(context, 16))
+                        .asConfirm("温馨提示", "之前下载的文件已经被删除，只能重新下载，确定重新下载？", () -> reDownload(context, record))
+                        .show();
+                return;
+            } else {
+                DownloadManager.instance().continueDownload(record, ignoreError);
+                if (!fromBatch) {
+                    ToastMgr.shortBottomCenter(context, "已开始继续下载");
+                }
+            }
+        } else {
+            //普通文件格式
+            String temp = DownloadConfig.rootPath + File.separator + record.getFileName() + "." + record.getFileExtension() + ".temp";
+            File tempDir = new File(temp);
+            File[] files = tempDir.isDirectory() ? tempDir.listFiles() : null;
+            if (!tempDir.exists() || files == null || files.length <= 0) {
+                if (fromBatch) {
+                    reDownload(context, record);
+                    return;
+                }
+                new XPopup.Builder(context)
+                        .borderRadius(DisplayUtil.dpToPx(context, 16))
+                        .asConfirm("温馨提示", "之前下载的文件已经被删除，只能重新下载，确定重新下载？", () -> reDownload(context, record))
+                        .show();
+                return;
+            } else {
+                DownloadManager.instance().continueDownload(record, ignoreError);
+                if (!fromBatch) {
+                    ToastMgr.shortBottomCenter(context, "已开始继续下载");
+                }
+            }
+        }
+    }
 
     public static void checkDownload(DownloadRecord record) {
         if (record == null) {
@@ -572,7 +1093,7 @@ public class DownloadRecordsFragment extends BaseFragment {
             return;
         }
         if (name.endsWith(".txt") || name.endsWith(".json") || name.endsWith(".hiker")) {
-            if (record.getSize() < 1024 * 1024 * 2) {
+            if (record.getSize() < 1024 * 1024 * 4) {
                 String p = getLocalPath(record);
                 HeavyTaskUtil.executeNewTask(() -> {
                     try {
@@ -593,7 +1114,7 @@ public class DownloadRecordsFragment extends BaseFragment {
                                 AutoImportHelper.importHikerRulesByTextWithDialog(activity, text, originalUrl);
                             } else {
                                 try {
-                                    AutoImportHelper.checkAutoText(activity, text);
+                                    AutoImportHelper.checkText(activity, text);
                                 } catch (Exception ignored) {
                                 }
                             }
@@ -610,8 +1131,10 @@ public class DownloadRecordsFragment extends BaseFragment {
         if ("dir".equals(record.getVideoType())) {
             //转存整个目录
             new XPopup.Builder(getContext())
+                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                     .asConfirm("温馨提示", "确定转存整个目录的文件到Download目录？注意该操作完成将删除原文件且无法恢复！", () -> {
                         LoadingPopupView loadingPopupView = new XPopup.Builder(getContext())
+                                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                                 .asLoading();
                         loadingPopupView.setTitle("转存中，请稍候").show();
                         HeavyTaskUtil.executeNewTask(() -> {
@@ -651,6 +1174,7 @@ public class DownloadRecordsFragment extends BaseFragment {
             return;
         }
         LoadingPopupView loadingPopupView = new XPopup.Builder(getContext())
+                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                 .asLoading();
         loadingPopupView.setTitle("转存中，请稍候").show();
         HeavyTaskUtil.executeNewTask(() -> {
@@ -658,18 +1182,16 @@ public class DownloadRecordsFragment extends BaseFragment {
             ThreadTool.INSTANCE.runOnUI(() -> {
                 if (getActivity() != null && !getActivity().isFinishing()) {
                     loadingPopupView.dismiss();
-                    new XPopup.Builder(getContext())
-                            .asConfirm("转存完成", "文件已转存到下载Download目录，可以在相册等第三方应用查看，是否删除原文件？", () -> {
-                                deleteByRecord(record);
-                            }).show();
+                    deleteByRecord(record, false);
+                    ToastMgr.shortCenter(getContext(), "已转存完成");
                 }
             });
         });
     }
 
-    private void reDownload(DownloadRecord record) {
+    private static void reDownload(Context context, DownloadRecord record) {
         if (StringUtil.isEmpty(record.getSourcePageUrl()) || !record.getSourcePageUrl().startsWith("http")) {
-            ToastMgr.shortBottomCenter(getContext(), "当前文件不支持重新下载");
+            ToastMgr.shortBottomCenter(context, "当前文件不支持重新下载");
             return;
         }
         DownloadManager.instance().cancelTask(record.getTaskId());
@@ -687,25 +1209,70 @@ public class DownloadRecordsFragment extends BaseFragment {
                 record.getSourcePageUrl(), record.getSourcePageTitle(), 0L);
         downloadTask.setFilm(record.getFilm());
         DownloadManager.instance().addTask(downloadTask);
-        ToastMgr.shortBottomCenter(getContext(), "已加入下载队列");
+        ToastMgr.shortBottomCenter(context, "已加入下载队列");
     }
 
     private void deleteByRecord(DownloadRecord record) {
-        new XPopup.Builder(getContext())
-                .asConfirm("温馨提示", "确认删除该下载内容吗？", () -> {
-                    ToastMgr.shortBottomCenter(getContext(), "正在删除下载任务");
-                    List<DownloadRecord> list = new ArrayList<>();
-                    if ("dir".equals(record.getVideoType())) {
-                        for (DownloadRecord rule : rules) {
-                            if (record.getSourcePageTitle().equals(rule.getFilm())) {
-                                list.add(rule);
-                            }
-                        }
-                    } else {
-                        list.add(record);
+        deleteByRecord(record, true);
+    }
+
+    private void deleteByRecord(DownloadRecord record, boolean confirm) {
+        OnConfirmListener listener = () -> {
+            if(confirm) {
+                ToastMgr.shortBottomCenter(getContext(), "正在删除下载任务");
+            }
+            List<DownloadRecord> list = new ArrayList<>();
+            if ("dir".equals(record.getVideoType())) {
+                for (DownloadRecord rule : rules) {
+                    if (record.getSourcePageTitle().equals(rule.getFilm())) {
+                        list.add(rule);
                     }
-                    deleteRecords(getContext(), list);
-                }).show();
+                }
+            } else {
+                list.add(record);
+            }
+            deleteRecords(getContext(), list);
+        };
+        if (confirm) {
+            new XPopup.Builder(getContext())
+                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                    .asConfirm("温馨提示", "确定删除其下载记录以及本地文件吗？", "仅删除记录", "确定", listener, () -> {
+                        List<DownloadRecord> list = new ArrayList<>();
+                        if ("dir".equals(record.getVideoType())) {
+                            for (DownloadRecord rule : rules) {
+                                if (record.getSourcePageTitle().equals(rule.getFilm())) {
+                                    list.add(rule);
+                                }
+                            }
+                        } else {
+                            list.add(record);
+                        }
+                        deleteKeepFiles(list);
+                        ToastMgr.shortBottomCenter(getContext(), "仅删除下载记录完成");
+                    }, false).show();
+        } else {
+            listener.onConfirm();
+        }
+    }
+
+    private void deleteKeepFiles(List<DownloadRecord> list) {
+        for (DownloadRecord record : list) {
+            if (record.getId() > 0) {
+                String normalPath = DownloadManager.getNormalFilePath(record);
+                if (normalPath != null) {
+                    File file = new File(normalPath);
+                    if (file.exists() && file.lastModified() > 0) {
+                        record.setSaveTime(file.lastModified());
+                    }
+                }
+                record.setStatus(DownloadStatusEnum.DELETED.getCode());
+                record.save();
+            } else {
+                //公开目录
+                record.setStatus(DownloadStatusEnum.DELETED.getCode());
+                record.save();
+            }
+        }
     }
 
     public static void deleteRecords(Context context, List<DownloadRecord> list) {
@@ -748,6 +1315,10 @@ public class DownloadRecordsFragment extends BaseFragment {
                 FileUtil.deleteDirs(temp);
                 String temp2 = DownloadConfig.rootPath + File.separator + downloadRecord.getFileName() + ".temp";
                 FileUtil.deleteDirs(temp2);
+                String finalExt = downloadRecord.getFileExtension();
+                if (StringUtil.isNotEmpty(finalExt)) {
+                    FileUtil.deleteDirs(temp2.replace(".temp", "").replace("." + finalExt, ""));
+                }
             }
         }
     }
@@ -759,7 +1330,7 @@ public class DownloadRecordsFragment extends BaseFragment {
     }
 
 
-    private static String getLocalPath(DownloadRecord downloadRecord) {
+    public static String getLocalPath(DownloadRecord downloadRecord) {
         String normalPath = DownloadManager.getNormalFilePath(downloadRecord);
         if (normalPath != null) {
             return normalPath;
@@ -782,6 +1353,7 @@ public class DownloadRecordsFragment extends BaseFragment {
 
     void batchDelete() {
         new XPopup.Builder(getContext())
+                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                 .asConfirm("温馨提示", "请点击下载项来勾选要删除/取消的内容", () -> {
                     isMultiDeleting = true;
                     if (getActivity() instanceof DownloadRecordsActivity) {

@@ -4,17 +4,23 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.request.RequestOptions;
 import com.example.hikerview.R;
 import com.example.hikerview.model.DownloadRecord;
+import com.example.hikerview.ui.browser.model.UrlDetector;
+import com.example.hikerview.ui.home.view.MyRoundedCorners;
 import com.example.hikerview.utils.FileUtil;
 import com.example.hikerview.utils.StringUtil;
 import com.example.hikerview.utils.TimeUtil;
 
+import java.io.File;
 import java.util.List;
 
 /**
@@ -49,12 +55,15 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
         if (viewType == -1) {
             return new DirHolder(LayoutInflater.from(context).inflate(R.layout.item_download_dir, parent, false));
         }
+        if (viewType == 1) {
+            return new RuleHolder(LayoutInflater.from(context).inflate(R.layout.item_download_highlight, parent, false));
+        }
         return new RuleHolder(LayoutInflater.from(context).inflate(R.layout.item_download, parent, false));
     }
 
     @Override
     public int getItemViewType(int position) {
-        return "dir".equals(list.get(position).getVideoType()) ? -1 : 0;
+        return "dir".equals(list.get(position).getVideoType()) ? -1 : (list.get(position).isLastPlay() ? 1 : 0);
     }
 
     public String getStatus(DownloadRecord downloadTask) {
@@ -77,7 +86,8 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             } else {
                 if (DownloadStatusEnum.SUCCESS.getCode().equals(record.getStatus())
                         && StringUtil.isNotEmpty(record.getPlayPos())) {
-                    holder.status.setText(("播放至" + record.getPlayPos()));
+                    String pos = record.getPlayPos().split("@@")[0];
+                    holder.status.setText(("播放至" + pos));
                 } else {
                     String status = getStatus(record);
                     if (DownloadStatusEnum.SUCCESS.getDesc().equals(status) && StringUtil.isNotEmpty(record.getFileExtension())) {
@@ -86,6 +96,36 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
                         holder.status.setText(status);
                     }
                 }
+            }
+            if (DownloadStatusEnum.SUCCESS.getCode().equals(record.getStatus()) && record.getSize() > 0
+                    && (UrlDetector.isImage(record.getFullName())
+                    || (UrlDetector.isVideoOrMusic(record.getFullName(), true) && !record.getFullName().contains(".m3u8")))) {
+                String normalPath = DownloadManager.getNormalFilePath(record);
+                if (normalPath != null) {
+                    File file = new File(normalPath);
+                    if (file.exists() && !file.isDirectory()) {
+                        holder.imageView.setVisibility(View.VISIBLE);
+                        RequestOptions requestOptions = RequestOptions.bitmapTransform(new MyRoundedCorners());
+                        if (StringUtil.isNotEmpty(record.getPlayPos())) {
+                            String[] s = record.getPlayPos().split("@@");
+                            if (s.length > 2) {
+                                long t = Long.parseLong(s[2]);
+                                requestOptions.frame(t * 1000);
+                                //requestOptions.set(VideoDecoder.FRAME_OPTION, MediaMetadataRetriever.OPTION_CLOSEST);
+                            }
+                        }
+                        Glide.with(context)
+                                .load(file.getAbsolutePath())
+                                .apply(requestOptions)
+                                .into(holder.imageView);
+                    } else {
+                        holder.imageView.setVisibility(View.GONE);
+                    }
+                } else {
+                    holder.imageView.setVisibility(View.GONE);
+                }
+            } else {
+                holder.imageView.setVisibility(View.GONE);
             }
             if (record.isSelected()) {
                 holder.bg.setBackground(context.getDrawable(R.drawable.ripple_disabled_grey));
@@ -127,6 +167,21 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             } else {
                 holder.bg.setBackground(context.getDrawable(R.drawable.ripple_white));
             }
+            int id = R.drawable.icon_folder3;
+            if ("安装包".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_app3;
+            } else if ("压缩包".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_zip2;
+            } else if ("音乐/音频".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_music3;
+            } else if ("文档/电子书".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_txt2;
+            } else if ("其它格式".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_unknown;
+            } else if ("图片".equals(record.getSourcePageTitle())) {
+                id = R.drawable.icon_pic3;
+            }
+            holder.img.setImageDrawable(context.getDrawable(id));
             bindClick(holder.bg, holder);
         }
     }
@@ -157,6 +212,7 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
     private class RuleHolder extends RecyclerView.ViewHolder {
         TextView title, status, speed, downloaded, item_download_time;
         View bg;
+        ImageView imageView;
 
         RuleHolder(View itemView) {
             super(itemView);
@@ -167,17 +223,20 @@ class DownloadRecordsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             downloaded = itemView.findViewById(R.id.item_download_downloaded);
             item_download_time = itemView.findViewById(R.id.item_download_time);
             speed = itemView.findViewById(R.id.item_download_speed);
+            imageView = itemView.findViewById(R.id.imageView);
         }
     }
 
     private class DirHolder extends RecyclerView.ViewHolder {
         TextView title;
         View bg;
+        ImageView img;
 
         DirHolder(View itemView) {
             super(itemView);
             bg = itemView.findViewById(R.id.item_download_bg);
             title = itemView.findViewById(R.id.item_download_title);
+            img = itemView.findViewById(R.id.item_reult_img);
         }
     }
 }

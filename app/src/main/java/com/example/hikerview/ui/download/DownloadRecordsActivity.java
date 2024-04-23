@@ -1,5 +1,8 @@
 package com.example.hikerview.ui.download;
 
+import static com.example.hikerview.utils.PreferenceMgr.SETTING_CONFIG;
+
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.MotionEvent;
@@ -18,12 +21,14 @@ import com.annimon.stream.Stream;
 import com.example.hikerview.R;
 import com.example.hikerview.event.DownloadStoreRefreshEvent;
 import com.example.hikerview.model.DownloadRecord;
+import com.example.hikerview.ui.ActivityManager;
 import com.example.hikerview.ui.base.BaseSlideActivity;
-import com.example.hikerview.ui.browser.model.UrlDetector;
 import com.example.hikerview.ui.browser.util.CollectionUtil;
 import com.example.hikerview.ui.download.enums.SortType;
 import com.example.hikerview.ui.setting.file.FileBrowserActivity;
+import com.example.hikerview.ui.setting.office.DownloadOfficer;
 import com.example.hikerview.ui.thunder.ThunderManager;
+import com.example.hikerview.ui.video.VideoPlayerActivity;
 import com.example.hikerview.ui.view.EnhanceTabLayout;
 import com.example.hikerview.ui.view.colorDialog.PromptDialog;
 import com.example.hikerview.utils.AlertNewVersionUtil;
@@ -43,15 +48,17 @@ import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
 import org.litepal.LitePal;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-
-import static com.example.hikerview.utils.PreferenceMgr.SETTING_CONFIG;
 
 /**
  * 作者：By 15968
@@ -87,7 +94,7 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
         int marginTop = MyStatusBarUtil.getStatusBarHeight(getContext()) + DisplayUtil.dpToPx(getContext(), 86);
         View bg = findView(R.id.download_list_bg);
         findView(R.id.download_list_window).setOnClickListener(view -> finish());
-        findView(R.id.download_list_bg).setOnClickListener(view -> {
+        bg.setOnClickListener(view -> {
         });
         RelativeLayout.LayoutParams layoutParams = (RelativeLayout.LayoutParams) bg.getLayoutParams();
         layoutParams.topMargin = marginTop;
@@ -132,13 +139,32 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
         return viewPager.getCurrentItem() == 0 ? downloadedFragment : downloadingFragment;
     }
 
+    public void showPage(String taskId) {
+        viewPager.setCurrentItem(0);
+        if (StringUtil.isNotEmpty(taskId)) {
+            downloadedFragment.openTaskItem(taskId);
+        }
+    }
+
     private void clickMenu(View view) {
         boolean download_time = PreferenceMgr.getBoolean(getContext(), SETTING_CONFIG, "download_time", false);
         new XPopup.Builder(getContext())
+                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                 .atView(view)
-                .asAttachList(new String[]{"排序方式", "批量删除", "文件管理", download_time ? "隐藏时间" : "显示时间"}, null,
+                .asAttachList(new String[]{"排序方式", "批量删除", "文件管理", download_time ? "隐藏时间" : "显示时间", "分类显示", "更多设置"}, null,
                         (position, text) -> {
                             switch (text) {
+                                case "分类显示":
+                                    new XPopup.Builder(getContext())
+                                            .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
+                                            .asCenterList(null, new String[]{"开启分类显示", "关闭分类显示"}, null, DownloadConfig.smartFilm ? 0 : 1, (position1, text1) -> {
+                                                DownloadConfig.smartFilm = position1 == 0;
+                                                PreferenceMgr.put(getContext(), "download", "smartFilm", DownloadConfig.smartFilm);
+                                            }).show();
+                                    break;
+                                case "更多设置":
+                                    DownloadOfficer.INSTANCE.show(getActivity());
+                                    break;
                                 case "排序方式":
                                     setSortType(view);
                                     break;
@@ -164,6 +190,7 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
     private void setSortType(View view) {
         int type0 = PreferenceMgr.getInt(getContext(), SETTING_CONFIG, "download_sort", 2);
         new XPopup.Builder(getContext())
+                .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                 .atView(view)
                 .asCenterList(null, SortType.getNames(), null, type0, (position, text) -> {
                     SortType type = SortType.getByName(text);
@@ -212,10 +239,14 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
                 return o1.getFileName().compareTo(o2.getFileName());
             };
             List<DownloadRecord> downloading = Stream.of(list)
-                    .filter(downloadRecord -> !DownloadStatusEnum.SUCCESS.getCode().equals(downloadRecord.getStatus()))
+                    .filter(downloadRecord -> !DownloadStatusEnum.SUCCESS.getCode().equals(downloadRecord.getStatus())
+                     && !DownloadStatusEnum.DELETED.getCode().equals(downloadRecord.getStatus()))
                     .collect(Collectors.toList());
             List<DownloadRecord> downloaded = Stream.of(list)
                     .filter(downloadRecord -> DownloadStatusEnum.SUCCESS.getCode().equals(downloadRecord.getStatus()))
+                    .collect(Collectors.toList());
+            List<DownloadRecord> deletedRecords = Stream.of(list)
+                    .filter(downloadRecord -> DownloadStatusEnum.DELETED.getCode().equals(downloadRecord.getStatus()))
                     .collect(Collectors.toList());
 
             List<DownloadRecord> localDownloaded = DownloadChooser.getLocalDownloaded(getContext());
@@ -223,6 +254,24 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
                 if (CollectionUtil.isNotEmpty(downloaded)) {
                     Set<String> records = new HashSet<>(Stream.of(downloaded).map(DownloadRecordsFragment::getLocalFileName).toList());
                     localDownloaded = Stream.of(localDownloaded).filter(it -> !records.contains(it.getFileName())).toList();
+                }
+                //移除那些仅删除记录的
+                if (CollectionUtil.isNotEmpty(deletedRecords)) {
+                    Map<String, Long> deletedMap = new HashMap<>();
+                    for (DownloadRecord deletedRecord : deletedRecords) {
+                        String fileName = DownloadRecordsFragment.getLocalFileName(deletedRecord);
+                        deletedMap.put(fileName, deletedRecord.getSaveTime());
+                    }
+                    Iterator<DownloadRecord> iterator = localDownloaded.iterator();
+                    while (iterator.hasNext()) {
+                        DownloadRecord record = iterator.next();
+                        if (deletedMap.containsKey(record.getFileName())) {
+                            Long t = deletedMap.get(record.getFileName());
+                            if (t != null && t == record.getSaveTime()) {
+                                iterator.remove();
+                            }
+                        }
+                    }
                 }
                 if (CollectionUtil.isNotEmpty(localDownloaded)) {
                     downloaded.addAll(localDownloaded);
@@ -275,15 +324,9 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
 
     private void appendFilm(DownloadRecord record) {
         if (StringUtil.isEmpty(record.getFilm())) {
-            if (UrlDetector.isMusic(record.getFullName())) {
-                record.setFilm("音乐/音频文件");
-            } else if (!UrlDetector.isVideoOrMusic(record.getFullName())) {
-                record.setFilm("非音视频格式文件");
-            }
-        } else if ("非音视频格式文件".equals(record.getFilm())) {
-            if (UrlDetector.isVideoOrMusic(record.getFullName())) {
-                record.setFilm(null);
-            }
+            record.setFilm(DownloadChooser.smartFilm(record.getFullName()));
+        } else if ("其它格式".equals(record.getFilm())) {
+            record.setFilm(DownloadChooser.smartFilm(record.getFullName()));
         }
     }
 
@@ -302,7 +345,9 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
         if (EventBus.getDefault().isRegistered(this)) {
             EventBus.getDefault().unregister(this);
         }
-        ThunderManager.INSTANCE.release();
+        if(!ActivityManager.getInstance().hasActivity(VideoPlayerActivity.class)) {
+            ThunderManager.INSTANCE.release();
+        }
     }
 
     public void showDeleteBtn() {
@@ -342,11 +387,12 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
                 return;
             }
             new XPopup.Builder(getContext())
+                    .borderRadius(DisplayUtil.dpToPx(getContext(), 16))
                     .asConfirm("温馨提示", "确认删除选中的" + records.size() + "项内容？", () -> {
                         getDownloadFragment().setMultiDeleting(false);
                         clearBtn.setText("清空");
                         if (loadingPopupView == null) {
-                            loadingPopupView = new XPopup.Builder(getContext()).asLoading();
+                            loadingPopupView = new XPopup.Builder(getContext()).borderRadius(DisplayUtil.dpToPx(getContext(), 16)).asLoading();
                         }
                         loadingPopupView.setTitle("正在删除中，请稍候");
                         loadingPopupView.show();
@@ -364,6 +410,60 @@ public class DownloadRecordsActivity extends BaseSlideActivity {
                     .show();
         }
     };
+
+    public static void clearApks(Context context) {
+        boolean apkClean = PreferenceMgr.getBoolean(context, "download", "apkClean", false);
+        if (!apkClean) {
+            return;
+        }
+        //下载记录
+        List<DownloadRecord> records = LitePal.where("status = ?", DownloadStatusEnum.SUCCESS.getCode()).find(DownloadRecord.class);
+        if (CollectionUtil.isNotEmpty(records)) {
+            List<DownloadRecord> downloads = new ArrayList<>();
+            for (DownloadRecord record : records) {
+                if ("apk".equals(record.getFileExtension()) || record.getFileName().endsWith(".apk")) {
+                    downloads.add(record);
+                }
+            }
+            if (CollectionUtil.isNotEmpty(downloads)) {
+                DownloadRecordsFragment.deleteRecordsSync(context, downloads);
+            }
+        }
+        //转存到公开目录的
+        List<DownloadRecord> recordList = DownloadChooser.scanLocalFiles(context);
+        if (CollectionUtil.isNotEmpty(recordList)) {
+            List<DownloadRecord> downloads = new ArrayList<>();
+            for (DownloadRecord record : recordList) {
+                if ("apk".equals(record.getFileExtension()) || record.getFileName().endsWith(".apk")) {
+                    downloads.add(record);
+                }
+            }
+            if (CollectionUtil.isNotEmpty(downloads)) {
+                DownloadRecordsFragment.deleteRecordsSync(context, downloads);
+            }
+        }
+        //默认下载目录的
+        String filePath = DownloadDialogUtil.getApkDownloadPath(context);
+        if (filePath != null && filePath.length() > 0) {
+            File dir = new File(filePath);
+            if (!dir.exists()) {
+                return;
+            }
+            File[] files = dir.listFiles();
+            if (files != null && files.length > 0) {
+                for (File file : files) {
+                    if (file.isDirectory() || !file.getName().endsWith(".apk")) {
+                        continue;
+                    }
+                    try {
+                        file.delete();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {

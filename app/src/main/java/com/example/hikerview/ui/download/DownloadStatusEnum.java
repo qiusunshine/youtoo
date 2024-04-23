@@ -17,7 +17,8 @@ public enum DownloadStatusEnum {
     CANCEL("cancel", "下载取消"),
     SUCCESS("success", "下载完成"),
     ERROR("error", "下载失败"),
-    UNKNOWN("unknown", "未知状态");
+    UNKNOWN("unknown", "未知状态"),
+    DELETED("deleted", "已删除");
 
     DownloadStatusEnum(String code, String desc) {
         this.code = code;

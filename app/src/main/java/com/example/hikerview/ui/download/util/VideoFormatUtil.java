@@ -16,6 +16,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,20 +61,39 @@ public class VideoFormatUtil {
      */
     public static VideoFormat getVideoFormat(@Nullable String title, String url) {
         Set<String> types = ShareUtil.getExtensions();
-        if (title != null && title.contains(".") && !title.contains(".m3u8")) {
-            String ext = FileUtil.getExtension(title);
+        String ext = null;
+        if (title != null && title.contains(".")) {
+            if (title.contains(".m3u8")) {
+                return new VideoFormat("m3u8", Collections.singletonList("m3u8"));
+            }
+            ext = FileUtil.getExtension(title);
             if (StringUtil.isNotEmpty(ext) && ext.length() < 10 && types.contains(ext)) {
                 return new VideoFormat(ext, Collections.singletonList(ext));
+            }
+            if (StringUtil.isNotEmpty(ext) && ext.length() > 1) {
+                if (title.endsWith(".apk.1")) {
+                    return new VideoFormat("apk", Collections.singletonList("apk"));
+                }
             }
         }
         String fileName = FileUtil.getResourceName(url);
         if (StringUtil.isNotEmpty(fileName) && fileName.contains(".")) {
+            if (url.contains(".m3u8")) {
+                return new VideoFormat("m3u8", Collections.singletonList("m3u8"));
+            }
             String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
             if (StringUtil.isNotEmpty(extension) && types.contains(extension)) {
                 return new VideoFormat(extension, Collections.singletonList(extension));
             }
         }
+        if (StringUtil.isNotEmpty(ext) && !isNumber(ext)) {
+            return new VideoFormat(ext, Collections.singletonList(ext));
+        }
         return null;
+    }
+
+    public static VideoFormat getVideoFormatAnyway(@Nullable String title, String url) {
+        return getVideoFormatAnyway(title, url, true);
     }
 
     /**
@@ -82,24 +102,47 @@ public class VideoFormatUtil {
      * @param url
      * @return
      */
-    public static VideoFormat getVideoFormatAnyway(String url) {
+    public static VideoFormat getVideoFormatAnyway(@Nullable String title, String url, boolean forceCheckM3u8) {
+        String ext = null;
+        if (title != null && title.contains(".")) {
+            if (title.contains(".m3u8") && forceCheckM3u8) {
+                return new VideoFormat("m3u8", Collections.singletonList("m3u8"));
+            }
+            ext = FileUtil.getExtension(title);
+        }
+        if (!isNumber(ext) && StringUtil.isNotEmpty(ext) && ext.length() < 10 && ext.length() > 1) {
+            return new VideoFormat(ext, Collections.singletonList(ext));
+        }
         String fileName = FileUtil.getResourceName(url);
         if (StringUtil.isNotEmpty(fileName) && fileName.contains(".")) {
-            String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
-            if (StringUtil.isNotEmpty(extension) && extension.length() < 10) {
-                try {
-                    Integer.parseInt(extension);
-                    if (!url.contains(".apk.")) {
-                        //纯数字，肯定不是文件后缀，排除微信改apk为apk.1的恶心操作
-                        return null;
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                return new VideoFormat(extension, Collections.singletonList(extension));
+            if (url.contains(".m3u8") && forceCheckM3u8) {
+                return new VideoFormat("m3u8", Collections.singletonList("m3u8"));
             }
+            ext = fileName.substring(fileName.lastIndexOf(".") + 1);
+        }
+        if (!isNumber(ext) && StringUtil.isNotEmpty(ext) && ext.length() < 10 && ext.length() > 1) {
+            return new VideoFormat(ext, Collections.singletonList(ext));
+        }
+        if (title != null && title.contains(".apk.")) {
+            return new VideoFormat("apk", Collections.singletonList("apk"));
+        }
+        if (url != null && url.contains(".apk.")) {
+            return new VideoFormat("apk", Collections.singletonList("apk"));
         }
         return null;
+    }
+
+    private static boolean isNumber(String str) {
+        try {
+            if (str == null || str.isEmpty()) {
+                return false;
+            }
+            Integer.parseInt(str);
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     private static VideoFormat getVideoFormatByName(Map<String, List<String>> headerMap, @Nullable String title, String url) {
@@ -108,13 +151,13 @@ public class VideoFormatUtil {
             if (headerMap != null && headerMap.containsKey("Content-Disposition")) {
                 fileName = DownloadManager.getDispositionFileName(headerMap.get("Content-Disposition").get(0));
             }
-            //先检查Content-Disposition和title
-            VideoFormat format = getVideoFormat(fileName, title);
+            //先检查Content-Disposition
+            VideoFormat format = getVideoFormat(fileName, null);
             if (format != null) {
                 return format;
             }
-            //最后再用url
-            return getVideoFormat(null, url);
+            //最后再用title和url
+            return getVideoFormat(title, url);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -122,11 +165,14 @@ public class VideoFormatUtil {
     }
 
     public static VideoFormat detectVideoFormat(@Nullable String title, String url, Map<String, List<String>> headerMap) {
+        if (headerMap == null) {
+            headerMap = new HashMap<>();
+        }
         List<String> cts = headerMap.get("Content-Type");
         if (cts == null || cts.isEmpty()) {
             return getVideoFormatByName(headerMap, title, url);
         }
-        String mime = cts.toString();
+        String mime = cts.get(0);
         try {
             String path = new URL(url).getPath();
             String extension = FileUtil.getExtension(path);
@@ -184,7 +230,7 @@ public class VideoFormatUtil {
             }
         }
         //实在匹配不到，只能把后缀弄上去，忽略校验
-        return getVideoFormatAnyway(url);
+        return getVideoFormatAnyway(title, url);
     }
 
     public static boolean isStreamContent(String contentType) {

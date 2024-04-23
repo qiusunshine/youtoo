@@ -50,10 +50,11 @@ public class DownloadForegroundService extends Service {
         notification = new NotificationCompat.Builder(Application.application, channelId)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)
+                .setSound(null)
                 .setContentTitle("嗅觉浏览器·正在下载")
                 .setContentText("请勿清理后台，否则下载会中断")
                 .setSmallIcon(R.drawable.ic_stat_download)
-                .setContentIntent(PendingIntent.getActivity(this, 1, new Intent(this, DownloadRecordsActivity.class),
+                .setContentIntent(PendingIntent.getActivity(this, ONGOING_NOTIFICATION_ID, new Intent(this, DownloadRecordsActivity.class),
                         PendingIntent.FLAG_UPDATE_CURRENT))
                 .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.mipmap.download));
         startForeground(ONGOING_NOTIFICATION_ID, notification.build());
